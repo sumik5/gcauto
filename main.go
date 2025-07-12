@@ -1,3 +1,4 @@
+// Package main provides gcauto, a tool that automatically generates git commit messages using Claude AI.
 package main
 
 import (

@@ -1,68 +1,79 @@
 version: "2"
+
 run:
-  go: 1.24.1
-  modules-download-mode: readonly
-  tests: false
-output:
-  formats:
-    text:
-      path: stdout
-      print-linter-name: true
+  timeout: 5m
+
 linters:
-  default: none
   enable:
-    - bodyclose
-    - containedctx
-    - depguard
     - errcheck
-    - errorlint
-    - gocritic
-    - godox
-    - gosec
     - govet
     - ineffassign
+    - staticcheck
+    - unused
+    - bodyclose
+    - dupl
+    - errname
+    - errorlint
+    - copyloopvar
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gosec
+    - lll
     - misspell
     - nakedret
-    - nilerr
+    - prealloc
     - revive
-    - rowserrcheck
-    - sqlclosecheck
-    - staticcheck
     - unconvert
     - unparam
-    - unused
-  settings:
-    depguard:
-      rules:
-        main:
-          deny:
-            - pkg: io/ioutil
-              desc: The io/ioutil package has been deprecated, see https://go.dev/doc/go1.16#ioutil
-    godox:
-      keywords:
-        - TODO
-    revive:
-      rules:
-        - name: package-comments
-          disabled: true
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - whitespace
+
+linters-settings:
+  goimports:
+    local-prefixes: github.com/shivase/gcauto
+  govet:
+    enable-all: true
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+  revive:
+    confidence: 0.8
+  misspell:
+    locale: US
+  lll:
+    line-length: 120
+  nakedret:
+    max-func-lines: 30
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+  gocyclo:
+    min-complexity: 15
+  godot:
+    scope: all
+    capital: true
+
 issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-severity:
-  default: error
+  exclude-rules:
+    - path: "_test\\.go"
+      linters:
+        - dupl
+        - gosec
+        - goconst
+    - linters:
+        - lll
+      source: "^//go:generate "
+
 formatters:
   enable:
     - gofmt
     - goimports
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
