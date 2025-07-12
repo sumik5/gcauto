@@ -25,9 +25,9 @@ jobs:
           cache: false
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v8.0.0
+          version: latest
           args: --timeout=5m --config=.golangci.yaml
           skip-cache: true
 
