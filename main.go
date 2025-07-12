@@ -50,8 +50,9 @@ func main() {
 }
 
 func generateCommitMessage() (string, error) {
-	prompt := `ステージングされたgitの変更を確認し、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。以下の形式で出力してください：
+	prompt := `ステージングされたgitの変更を確認し、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。
 
+以下の形式で直接出力してください：
 型: 簡潔な変更内容
 
 - 具体的な変更点1
@@ -59,8 +60,9 @@ func generateCommitMessage() (string, error) {
 - 具体的な変更点3
 
 注意事項：
-- 🤖やCo-Authored-Byなどの情報は含めないでください
+- 前置きや説明文は一切含めないでください
 - コミットメッセージ本文のみを出力してください
+- 🤖やCo-Authored-Byなどの情報は含めないでください
 - 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください`
 
 	cmd := exec.Command("claude", "-p", prompt)
