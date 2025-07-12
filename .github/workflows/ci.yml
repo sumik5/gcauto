@@ -22,13 +22,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false
 
       - name: Install golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: latest
-          args: --timeout=5m
+          args: --timeout=5m --config=.golangci.yaml
+          skip-cache: true
 
       - name: Run go fmt check
         run: |
@@ -70,7 +71,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false
 
       - name: Build binary
         env:
