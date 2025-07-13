@@ -26,24 +26,30 @@ gcautoは、ステージングされたGitの変更を分析し、Claude AIを�
 
 ### リリースバイナリから（推奨）
 
-[Releases](https://github.com/shivase/gcauto/releases)ページから、お使いのOS/アーキテクチャに対応したバイナリをダウンロードしてください。
+[Releases](https://github.com/shivase/gcauto/releases)ページから、お使いのOS/アーキテクチャに対応したZIPファイルをダウンロードしてください。
 
 ```bash
 # macOS (Intel)
-curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-darwin-amd64 -o gcauto
+curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-darwin-amd64.zip -o gcauto.zip
 
 # macOS (Apple Silicon)
-curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-darwin-arm64 -o gcauto
+curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-darwin-arm64.zip -o gcauto.zip
 
 # Linux (x86_64)
-curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-linux-amd64 -o gcauto
+curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-linux-amd64.zip -o gcauto.zip
 
 # Linux (ARM64)
-curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-linux-arm64 -o gcauto
+curl -L https://github.com/shivase/gcauto/releases/latest/download/gcauto-linux-arm64.zip -o gcauto.zip
+
+# ZIPファイルを解凍
+unzip gcauto.zip
 
 # 実行権限を付与してインストール
 chmod +x gcauto
 sudo mv gcauto /usr/local/bin/
+
+# 一時ファイルを削除
+rm gcauto.zip
 ```
 
 ### ソースからビルド

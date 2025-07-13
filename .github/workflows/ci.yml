@@ -22,13 +22,14 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
-          args: --timeout=5m
+          args: --timeout=5m --config=.golangci.yaml
+          skip-cache: true
 
       - name: Run go fmt check
         run: |
@@ -44,9 +45,25 @@ jobs:
       - name: Run make lint
         run: make lint
 
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+          cache: false
+
+      - name: Run tests
+        run: make test
+
   build-and-release:
     name: Build and Release
-    needs: lint
+    needs: [lint, test]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     strategy:
@@ -70,24 +87,33 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: 'go.mod'
-          cache: true
+          cache: false
 
       - name: Build binary
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
         run: |
-          output_name="gcauto-${{ matrix.os }}-${{ matrix.arch }}"
+          output_name="gcauto"
           if [ "${{ matrix.os }}" = "windows" ]; then
             output_name="${output_name}.exe"
           fi
           go build -v -o "${output_name}" .
 
+      - name: Create zip archive
+        run: |
+          zip_name="gcauto-${{ matrix.os }}-${{ matrix.arch }}.zip"
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            zip "${zip_name}" "gcauto.exe"
+          else
+            zip "${zip_name}" "gcauto"
+          fi
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: gcauto-${{ matrix.os }}-${{ matrix.arch }}
-          path: gcauto-*
+          path: gcauto-${{ matrix.os }}-${{ matrix.arch }}.zip
           retention-days: 30
 
   create-release:
@@ -106,21 +132,10 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create checksums
-        run: |
-          cd artifacts
-          for dir in */; do
-            cd "$dir"
-            for file in *; do
-              sha256sum "$file" > "${file}.sha256"
-            done
-            cd ..
-          done
-
       - name: Prepare release files
         run: |
           mkdir -p release
-          find artifacts -type f \( -name "gcauto-*" -o -name "*.sha256" \) -exec cp {} release/ \;
+          find artifacts -type f -name "*.zip" -exec cp {} release/ \;
           ls -la release/
 
       - name: Create Release
