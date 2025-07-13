@@ -9,6 +9,8 @@
 
 gcautoは、ステージングされたGitの変更を分析し、Claude AIを使用してConventional Commitsフォーマットの日本語コミットメッセージを自動生成するツールです。
 
+![gcauto実行イメージ](docs/command_image.png)
+
 ## 機能
 
 - ステージングされた変更を自動で分析
@@ -21,6 +23,18 @@ gcautoは、ステージングされたGitの変更を分析し、Claude AIを�
 - Go 1.22以上
 - Git
 - [Claude CLI](https://docs.anthropic.com/claude/docs/claude-cli)がインストールされ、設定済みであること
+
+## 使い方
+
+```bash
+# Gitの変更をステージング
+git add .
+
+# gcautoを実行
+gcauto
+
+# コミットメッセージが自動生成され、確認プロンプトが表示されます
+```
 
 ## インストール
 
