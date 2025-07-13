@@ -212,7 +212,7 @@ func TestMainUserInput(t *testing.T) {
 
 			cmd := exec.Command(os.Args[0], "-test.run="+t.Name())
 			cmd.Env = append(os.Environ(), "BE_CRASHER=1")
-			
+
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
 			err := cmd.Run()
