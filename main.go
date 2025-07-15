@@ -3,6 +3,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -23,10 +24,11 @@ func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
 	cmd := exec.Command("claude", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("%v: %s", err, string(exitErr.Stderr))
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return "", fmt.Errorf("claude execution failed: %w: %s", err, string(exitErr.Stderr))
 		}
-		return "", err
+		return "", fmt.Errorf("failed to run claude command: %w", err)
 	}
 	return strings.TrimSpace(string(output)), nil
 }
@@ -40,10 +42,11 @@ func (e *GeminiExecutor) Execute(prompt string) (string, error) {
 	cmd := exec.Command("gemini", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return "", fmt.Errorf("%v: %s", err, string(exitErr.Stderr))
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return "", fmt.Errorf("gemini execution failed: %w: %s", err, string(exitErr.Stderr))
 		}
-		return "", err
+		return "", fmt.Errorf("failed to run gemini command: %w", err)
 	}
 
 	lines := strings.Split(string(output), "\n")
