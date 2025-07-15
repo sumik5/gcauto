@@ -11,17 +11,22 @@ import (
 	"strings"
 )
 
-// AIExecutor defines the interface for executing AI models.
+var execCommand = exec.Command
+
+// AIExecutor defines the interface for generating commit messages.
 type AIExecutor interface {
-	Execute(prompt string) (string, error)
+	GenerateCommitMessage(diff string) (string, error)
 }
 
 // ClaudeExecutor implements AIExecutor for the Claude model.
 type ClaudeExecutor struct{}
 
-// Execute runs the claude command with the given prompt.
-func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p", prompt)
+// GenerateCommitMessage generates a commit message using the Claude model.
+func (e *ClaudeExecutor) GenerateCommitMessage(diff string) (string, error) {
+	prompt := fmt.Sprintf("以下のgitの差分情報に基づいて、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。\n\n---\n%s\n---\n\n以下の形式で直接出力してください：\n型: 簡潔な変更内容\n\n- 具体的な変更点1\n- 具体的な変更点2\n- 具体的な変更点3\n\n注意事項：\n- 前置きや説明文は一切含めないでください\n- コミットメッセージ本文のみを出力してください\n- 🤖やCo-Authored-Byなどの情報は含めないでください\n- 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください", diff)
+
+	// #nosec G204
+	cmd := execCommand("claude", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -36,10 +41,12 @@ func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
 // GeminiExecutor implements AIExecutor for the Gemini model.
 type GeminiExecutor struct{}
 
-// Execute runs the gemini command with the given prompt.
-func (e *GeminiExecutor) Execute(prompt string) (string, error) {
-	// Assuming gemini command has a similar interface to claude.
-	cmd := exec.Command("gemini", "-p", prompt)
+// GenerateCommitMessage generates a commit message using the Gemini model.
+func (e *GeminiExecutor) GenerateCommitMessage(diff string) (string, error) {
+	prompt := fmt.Sprintf("以下のgitの差分情報に基づいて、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。\n\n---\n%s\n---\n\n以下の形式で直接出力してください：\n型: 簡潔な変更内容\n\n- 具体的な変更点1\n- 具体的な変更点2\n- 具体的な変更点3\n\n注意事項：\n- 前置きや説明文は一切含めないでください\n- コミットメッセージ本文のみを出力してください\n- やCo-Authored-Byなどの情報は含めないでください\n- 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください", diff)
+
+	// #nosec G204
+	cmd := execCommand("gemini", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -123,7 +130,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	commitMessage, err := generateCommitMessage(executor, diff)
+	commitMessage, err := executor.GenerateCommitMessage(diff)
 	if err != nil {
 		fmt.Printf("❌ Error: Failed to generate commit message: %v\n", err)
 		os.Exit(1)
@@ -161,38 +168,15 @@ func main() {
 	}
 }
 
-func generateCommitMessage(executor AIExecutor, diff string) (string, error) {
-	prompt := fmt.Sprintf(`以下のgitの差分情報に基づいて、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。
-
----
-%s
----
-
-以下の形式で直接出力してください：
-型: 簡潔な変更内容
-
-- 具体的な変更点1
-- 具体的な変更点2
-- 具体的な変更点3
-
-注意事項：
-- 前置きや説明文は一切含めないでください
-- コミットメッセージ本文のみを出力してください
-- 🤖やCo-Authored-Byなどの情報は含めないでください
-- 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください`, diff)
-
-	return executor.Execute(prompt)
-}
-
 func gitCommit(message string) error {
-	cmd := exec.Command("git", "commit", "-m", message)
+	cmd := execCommand("git", "commit", "-m", message)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 func _getStagedDiff() (string, error) {
-	cmd := exec.Command("git", "diff", "--staged")
+	cmd := execCommand("git", "diff", "--staged")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err

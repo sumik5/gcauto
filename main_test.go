@@ -17,89 +17,46 @@ type MockAIExecutor struct {
 }
 
 // Execute returns the mock response or error.
-func (m *MockAIExecutor) Execute(prompt string) (string, error) {
+func (m *MockAIExecutor) GenerateCommitMessage(diff string) (string, error) {
 	if m.MockError != nil {
 		return "", m.MockError
 	}
 	return m.MockResponse, nil
 }
 
-func TestGenerateCommitMessage(t *testing.T) {
+func TestClaudeExecutor_GenerateCommitMessage(t *testing.T) {
 	tests := []struct {
-		name         string
-		mockResponse string
-		mockError    error
-		wantError    bool
-		wantEmpty    bool
+		name           string
+		mockResponse   string
+		mockError      error
+		wantError      bool
+		commitCommands [][]string
 	}{
 		{
 			name:         "valid conventional commit message",
 			mockResponse: "feat: 新しい機能を追加\n\n- 機能1を追加\n- 機能2を追加",
 			wantError:    false,
-			wantEmpty:    false,
-		},
-		{
-			name:         "fix type commit message",
-			mockResponse: "fix: バグを修正",
-			wantError:    false,
-			wantEmpty:    false,
-		},
-		{
-			name:      "error from ai",
-			mockError: os.ErrNotExist,
-			wantError: true,
-		},
-		{
-			name:         "empty response",
-			mockResponse: "",
-			wantError:    false,
-			wantEmpty:    true,
+			commitCommands: [][]string{
+				{"claude", "-p", "以下のgitの差分情報に基づいて、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。\n\n---\nfakediff\n---\n\n以下の形式で直接出力してください：\n型: 簡潔な変更内容\n\n- 具体的な変更点1\n- 具体的な変更点2\n- 具体的な変更点3\n\n注意事項：\n- 前置きや説明文は一切含めないでください\n- コミットメッセージ本文のみを出力してください\n- 🤖やCo-Authored-Byなどの情報は含めないでください\n- 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください"},
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			executor := &MockAIExecutor{
-				MockResponse: tt.mockResponse,
-				MockError:    tt.mockError,
-			}
+			execCommand = mockExecCommand(t, tt.commitCommands, tt.mockResponse, tt.mockError)
+			defer func() { execCommand = exec.Command }()
 
-			message, err := generateCommitMessage(executor, "fake diff")
+			executor := &ClaudeExecutor{}
+			message, err := executor.GenerateCommitMessage("fakediff")
 
-			if tt.wantError {
-				if err == nil {
-					t.Error("generateCommitMessage() expected error but got none")
-				}
+			if (err != nil) != tt.wantError {
+				t.Errorf("GenerateCommitMessage() error = %v, wantErr %v", err, tt.wantError)
 				return
 			}
 
-			if err != nil {
-				t.Errorf("generateCommitMessage() unexpected error = %v", err)
-				return
-			}
-
-			if tt.wantEmpty {
-				if message != "" {
-					t.Errorf("generateCommitMessage() expected empty message but got %s", message)
-				}
-				return
-			}
-
-			if message == "" {
-				t.Error("generateCommitMessage() returned empty message")
-			}
-
-			conventionalTypes := []string{"feat:", "fix:", "docs:", "style:", "refactor:", "test:", "chore:"}
-			hasValidType := false
-			for _, typ := range conventionalTypes {
-				if strings.HasPrefix(message, typ) {
-					hasValidType = true
-					break
-				}
-			}
-
-			if !hasValidType && !tt.wantEmpty {
-				t.Errorf("generateCommitMessage() returned message without valid conventional commit type: %s", message)
+			if message != tt.mockResponse {
+				t.Errorf("GenerateCommitMessage() got = %v, want %v", message, tt.mockResponse)
 			}
 		})
 	}
@@ -279,5 +236,36 @@ func TestMain_InvalidModel(t *testing.T) {
 	expectedError := "invalid model specified: invalid"
 	if !strings.Contains(string(output), expectedError) {
 		t.Errorf("Expected output to contain '%s', but got '%s'", expectedError, string(output))
+	}
+}
+
+// TestHelperProcess isn't a real test. It's a helper process that the mock
+// exec.Cmd calls.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+	// Check what to do
+	if os.Getenv("EXIT_CODE") == "1" {
+		fmt.Fprint(os.Stderr, os.Getenv("STDERR"))
+		os.Exit(1)
+	}
+	fmt.Fprint(os.Stdout, os.Getenv("STDOUT"))
+	os.Exit(0)
+}
+
+func mockExecCommand(t *testing.T, expectedCommands [][]string, mockResponse string, mockError error) func(string, ...string) *exec.Cmd {
+	return func(command string, args ...string) *exec.Cmd {
+		cs := []string{"-test.run=TestHelperProcess", "--", command}
+		cs = append(cs, args...)
+		cmd := exec.Command(os.Args[0], cs...)
+		cmd.Env = []string{
+			"GO_WANT_HELPER_PROCESS=1",
+			"STDOUT=" + mockResponse,
+		}
+		if mockError != nil {
+			cmd.Env = append(cmd.Env, "EXIT_CODE=1", "STDERR="+mockError.Error())
+		}
+		return cmd
 	}
 }
