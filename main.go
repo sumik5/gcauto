@@ -43,7 +43,7 @@ type GeminiExecutor struct{}
 
 // GenerateCommitMessage generates a commit message using the Gemini model.
 func (e *GeminiExecutor) GenerateCommitMessage(diff string) (string, error) {
-	prompt := fmt.Sprintf("以下のgitの差分情報に基づいて、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。\n\n---\n%s\n---\n\n以下の形式で直接出力してください：\n型: 簡潔な変更内容\n\n- 具体的な変更点1\n- 具体的な変更点2\n- 具体的な変更点3\n\n注意事項：\n- 前置きや説明文は一切含めないでください\n- コミットメッセージ本文のみを出力してください\n- やCo-Authored-Byなどの情報は含めないでください\n- 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください", diff)
+	prompt := fmt.Sprintf("以下のgitの差分情報に基づいて、conventional commitsフォーマットで日本語のコミットメッセージを作成してください。\n\n---\n%s\n---\n\n以下の形式で直接出力してください：\n型: 簡潔な変更内容\n\n- 具体的な変更点1\n- 具体的な変更点2\n- 具体的な変更点3\n\n注意事項：\n- 前置きや説明文は一切含めないでください\n- コミットメッセージ本文のみを出力してください\n- 🤖やCo-Authored-Byなどの情報は含めないでください\n- 型は feat/fix/docs/style/refactor/test/chore から適切なものを選択してください", diff)
 
 	// #nosec G204
 	cmd := execCommand("gemini", "-p", prompt)
