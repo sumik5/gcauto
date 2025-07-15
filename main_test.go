@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -9,24 +10,21 @@ import (
 	"testing"
 )
 
-type MockClaudeExecutor struct {
-	mockResponse string
-	mockError    error
+// MockAIExecutor is a mock implementation of AIExecutor for testing.
+type MockAIExecutor struct {
+	MockResponse string
+	MockError    error
 }
 
-func (m *MockClaudeExecutor) Execute(prompt string) (string, error) {
-	if m.mockError != nil {
-		return "", m.mockError
+// Execute returns the mock response or error.
+func (m *MockAIExecutor) Execute(prompt string) (string, error) {
+	if m.MockError != nil {
+		return "", m.MockError
 	}
-	return m.mockResponse, nil
+	return m.MockResponse, nil
 }
 
 func TestGenerateCommitMessage(t *testing.T) {
-	originalExecutor := claudeExecutor
-	defer func() {
-		claudeExecutor = originalExecutor
-	}()
-
 	tests := []struct {
 		name         string
 		mockResponse string
@@ -47,7 +45,7 @@ func TestGenerateCommitMessage(t *testing.T) {
 			wantEmpty:    false,
 		},
 		{
-			name:      "error from claude",
+			name:      "error from ai",
 			mockError: os.ErrNotExist,
 			wantError: true,
 		},
@@ -61,12 +59,12 @@ func TestGenerateCommitMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			claudeExecutor = &MockClaudeExecutor{
-				mockResponse: tt.mockResponse,
-				mockError:    tt.mockError,
+			executor := &MockAIExecutor{
+				MockResponse: tt.mockResponse,
+				MockError:    tt.mockError,
 			}
 
-			message, err := generateCommitMessage()
+			message, err := generateCommitMessage(executor, "fake diff")
 
 			if tt.wantError {
 				if err == nil {
@@ -161,20 +159,28 @@ func TestGitCommit(t *testing.T) {
 }
 
 func TestMainUserInput(t *testing.T) {
-	// モックを設定してClaudeコマンドの実行を避ける
-	originalExecutor := claudeExecutor
-	claudeExecutor = &MockClaudeExecutor{
-		mockResponse: "test: テスト用のコミットメッセージ",
+	originalGetStagedDiff := getStagedDiff
+	getStagedDiff = func() (string, error) {
+		return "fake diff for main user input test", nil
 	}
 	defer func() {
-		claudeExecutor = originalExecutor
+		getStagedDiff = originalGetStagedDiff
+	}()
+
+	originalNewExecutor := newExecutor
+	newExecutor = func(model string) (AIExecutor, error) {
+		return &MockAIExecutor{
+			MockResponse: "test: テスト用のコミットメッセージ",
+		}, nil
+	}
+	defer func() {
+		newExecutor = originalNewExecutor
 	}()
 
 	tests := []struct {
-		name      string
-		input     string
-		wantExit  int
-		wantError bool
+		name     string
+		input    string
+		wantExit int
 	}{
 		{
 			name:     "User cancels with 'n'",
@@ -201,8 +207,8 @@ func TestMainUserInput(t *testing.T) {
 				os.Stdin = r
 
 				go func() {
-					io.WriteString(w, tt.input)
-					w.Close()
+					_, _ = io.WriteString(w, tt.input)
+					_ = w.Close()
 				}()
 
 				main()
@@ -221,9 +227,57 @@ func TestMainUserInput(t *testing.T) {
 				if e.ExitCode() != tt.wantExit {
 					t.Errorf("Process exited with code %d, want %d", e.ExitCode(), tt.wantExit)
 				}
+			} else if err != nil {
+				t.Errorf("Process exited with unexpected error: %v", err)
 			} else if tt.wantExit != 0 {
 				t.Errorf("Process did not exit as expected")
 			}
 		})
+	}
+}
+
+func TestMain_InvalidModel(t *testing.T) {
+	originalNewExecutor := newExecutor
+	newExecutor = func(model string) (AIExecutor, error) {
+		return nil, fmt.Errorf("invalid model specified: %s", model)
+	}
+	defer func() {
+		newExecutor = originalNewExecutor
+	}()
+
+	if os.Getenv("BE_CRASHER") == "1" {
+		// This part of the test runs in a separate process.
+		// When the test is re-run with BE_CRASHER, os.Args contains flags for the
+		// test runner, followed by "--", followed by flags for our main function.
+		// We need to strip out the test runner flags.
+		args := os.Args
+		for i, arg := range args {
+			if arg == "--" {
+				os.Args = append([]string{args[0]}, args[i+1:]...)
+				break
+			}
+		}
+		main()
+		return
+	}
+
+	// This is the main test process.
+	cmd := exec.Command(os.Args[0], "-test.run=TestMain_InvalidModel", "--", "-model=invalid")
+	cmd.Env = append(os.Environ(), "BE_CRASHER=1")
+
+	output, err := cmd.CombinedOutput()
+	if e, ok := err.(*exec.ExitError); ok {
+		if e.ExitCode() != 1 {
+			t.Errorf("Process exited with code %d, want 1", e.ExitCode())
+		}
+	} else if err != nil {
+		t.Errorf("Process exited with unexpected error: %v", err)
+	} else {
+		t.Errorf("Process did not exit as expected")
+	}
+
+	expectedError := "invalid model specified: invalid"
+	if !strings.Contains(string(output), expectedError) {
+		t.Errorf("Expected output to contain '%s', but got '%s'", expectedError, string(output))
 	}
 }
