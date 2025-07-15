@@ -23,6 +23,9 @@ func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
 	cmd := exec.Command("claude", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("%v: %s", err, string(exitErr.Stderr))
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -37,9 +40,21 @@ func (e *GeminiExecutor) Execute(prompt string) (string, error) {
 	cmd := exec.Command("gemini", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return "", fmt.Errorf("%v: %s", err, string(exitErr.Stderr))
+		}
 		return "", err
 	}
-	return strings.TrimSpace(string(output)), nil
+
+	lines := strings.Split(string(output), "\n")
+	var filteredLines []string
+	for _, line := range lines {
+		if !strings.Contains(line, "Loaded cached credentials.") {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(filteredLines, "\n")), nil
 }
 
 var newExecutor = func(model string) (AIExecutor, error) {

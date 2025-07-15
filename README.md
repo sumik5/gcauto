@@ -7,7 +7,7 @@
 
 ## 概要
 
-gcautoは、ステージングされたGitの変更を分析し、Claude AIを使用してConventional Commitsフォーマットの日本語コミットメッセージを自動生成するツールです。
+gcautoは、ステージングされたGitの変更を分析し、AIを使用してConventional Commitsフォーマットの日本語コミットメッセージを自動生成するツールです。
 
 ![gcauto実行イメージ](docs/command_image.png)
 
@@ -17,12 +17,15 @@ gcautoは、ステージングされたGitの変更を分析し、Claude AIを�
 - Conventional Commitsフォーマットに準拠したコミットメッセージを生成
 - 日本語でのわかりやすいコミットメッセージ
 - コミット前の確認プロンプト
+- 使用するAIモデルを選択可能（Claude, Gemini）
 
 ## 必要条件
 
 - Go 1.22以上
 - Git
-- [Claude CLI](https://docs.anthropic.com/claude/docs/claude-cli)がインストールされ、設定済みであること
+- 使用するAIモデルに応じたCLIツールがインストールされ、設定済みであること
+  - [Claude CLI](https://docs.anthropic.com/claude/docs/claude-cli)
+  - [Gemini CLI](https://ai.google.dev/tutorials/gemini_cli_quickstart?hl=ja)
 
 ## 使い方
 
@@ -30,8 +33,13 @@ gcautoは、ステージングされたGitの変更を分析し、Claude AIを�
 # Gitの変更をステージング
 git add .
 
-# gcautoを実行
+# gcautoを実行（デフォルトはClaude）
 gcauto
+
+# Geminiを使用する場合
+gcauto --model gemini
+# または
+gcauto -m gemini
 
 # コミットメッセージが自動生成され、確認プロンプトが表示されます
 ```
