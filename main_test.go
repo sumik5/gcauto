@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -111,35 +110,37 @@ func TestGitCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
 
-	if err := os.Chdir(tempDir); err != nil {
-		t.Fatal(err)
+	if chdirErr := os.Chdir(tempDir); chdirErr != nil {
+		t.Fatal(chdirErr)
 	}
 
 	cmd := exec.Command("git", "init")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to initialize git repo: %v", err)
+	if initErr := cmd.Run(); initErr != nil {
+		t.Fatalf("Failed to initialize git repo: %v", initErr)
 	}
 
 	cmd = exec.Command("git", "config", "user.email", "test@example.com")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to set git user.email: %v", err)
+	if configErr := cmd.Run(); configErr != nil {
+		t.Fatalf("Failed to set git user.email: %v", configErr)
 	}
 
 	cmd = exec.Command("git", "config", "user.name", "Test User")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to set git user.name: %v", err)
+	if configErr := cmd.Run(); configErr != nil {
+		t.Fatalf("Failed to set git user.name: %v", configErr)
 	}
 
 	testFile := "test.txt"
-	if err := os.WriteFile(testFile, []byte("test content"), 0644); err != nil {
-		t.Fatal(err)
+	if writeErr := os.WriteFile(testFile, []byte("test content"), 0o644); writeErr != nil {
+		t.Fatal(writeErr)
 	}
 
 	cmd = exec.Command("git", "add", testFile)
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("Failed to add file: %v", err)
+	if addErr := cmd.Run(); addErr != nil {
+		t.Fatalf("Failed to add file: %v", addErr)
 	}
 
 	err = gitCommit("test: テストコミット")
@@ -207,7 +208,7 @@ func TestMainUserInput(t *testing.T) {
 				os.Stdin = r
 
 				go func() {
-					_, _ = io.WriteString(w, tt.input)
+					_, _ = w.WriteString(tt.input)
 					_ = w.Close()
 				}()
 
