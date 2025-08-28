@@ -193,7 +193,7 @@ func main() {
 			fmt.Println("\n✏️ Message updated!")
 			continue
 		case "n", "no", "":
-			fmt.Println("\n⏹️ Commit cancelled.")
+			fmt.Println("\n⏹️ Commit canceled.")
 			os.Exit(0)
 		default:
 			fmt.Println("\n⚠️ Invalid choice. Please enter y, n, or e.")
@@ -276,34 +276,37 @@ func editMessageInEditor(originalMessage string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary file: %w", err)
 	}
+	tmpfileName := tmpfile.Name()
 	defer func() {
-		_ = os.Remove(tmpfile.Name())
+		// nolint:errcheck // Best-effort cleanup in defer
+		_ = os.Remove(tmpfileName)
 	}()
 
 	// Write the original message to the file
-	if _, err := tmpfile.WriteString(originalMessage); err != nil {
+	if _, writeErr := tmpfile.WriteString(originalMessage); writeErr != nil {
+		// nolint:errcheck // Already handling write error
 		_ = tmpfile.Close()
-		return "", fmt.Errorf("failed to write to temporary file: %w", err)
+		return "", fmt.Errorf("failed to write to temporary file: %w", writeErr)
 	}
-	if err := tmpfile.Close(); err != nil {
-		return "", fmt.Errorf("failed to close temporary file: %w", err)
+	if closeErr := tmpfile.Close(); closeErr != nil {
+		return "", fmt.Errorf("failed to close temporary file: %w", closeErr)
 	}
 
 	// Open the editor
 	// #nosec G204 - editor is from environment variable, which is expected behavior
-	cmd := exec.Command(editor, tmpfile.Name())
+	cmd := exec.Command(editor, tmpfileName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to run editor: %w", err)
+	if runErr := cmd.Run(); runErr != nil {
+		return "", fmt.Errorf("failed to run editor: %w", runErr)
 	}
 
 	// Read the edited content
-	editedContent, err := os.ReadFile(tmpfile.Name())
-	if err != nil {
-		return "", fmt.Errorf("failed to read edited file: %w", err)
+	editedContent, readErr := os.ReadFile(tmpfileName)
+	if readErr != nil {
+		return "", fmt.Errorf("failed to read edited file: %w", readErr)
 	}
 
 	return strings.TrimSpace(string(editedContent)), nil
