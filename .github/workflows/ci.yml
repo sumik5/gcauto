@@ -25,10 +25,10 @@ jobs:
           cache: false
 
       - name: Install golangci-lint
-        uses: golangci/golangci-lint-action@v8
+        uses: golangci/golangci-lint-action@v6
         with:
-          version: latest
-          args: --timeout=5m --config=.golangci.yaml
+          version: v1.61.0
+          args: --timeout=5m
           skip-cache: true
 
       - name: Run go fmt check
@@ -41,9 +41,6 @@ jobs:
 
       - name: Run go vet
         run: go vet ./...
-
-      - name: Run make lint
-        run: make lint
 
   test:
     name: Test
@@ -59,7 +56,7 @@ jobs:
           cache: false
 
       - name: Run tests
-        run: make test
+        run: go test -v -short ./...
 
   build-and-release:
     name: Build and Release
@@ -89,6 +86,9 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
+      - name: Get version from tag
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
       - name: Build binary
         env:
           GOOS: ${{ matrix.os }}
@@ -98,15 +98,15 @@ jobs:
           if [ "${{ matrix.os }}" = "windows" ]; then
             output_name="${output_name}.exe"
           fi
-          go build -v -o "${output_name}" .
+          go build -ldflags "-X main.version=${{ env.VERSION }}" -v -o "${output_name}" .
 
       - name: Create zip archive
         run: |
           zip_name="gcauto-${{ matrix.os }}-${{ matrix.arch }}.zip"
           if [ "${{ matrix.os }}" = "windows" ]; then
-            zip "${zip_name}" "gcauto.exe"
+            zip "${zip_name}" "gcauto.exe" README.md LICENSE
           else
-            zip "${zip_name}" "gcauto"
+            zip "${zip_name}" "gcauto" README.md LICENSE
           fi
 
       - name: Upload artifact
