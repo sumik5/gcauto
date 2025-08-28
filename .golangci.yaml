@@ -1,68 +1,98 @@
-version: "2"
 run:
-  go: 1.22
-  modules-download-mode: readonly
-  tests: false
-output:
-  formats:
-    text:
-      path: stdout
-      print-linter-name: true
+  timeout: 5m
+  tests: true
+
 linters:
-  default: none
   enable:
     - bodyclose
-    - containedctx
-    - depguard
+    - dogsled
+    - dupl
     - errcheck
-    - errorlint
+    - exhaustive
+    - gochecknoinits
+    - goconst
     - gocritic
-    - godox
+    - gocyclo
+    - gofmt
+    - goimports
     - gosec
+    - gosimple
     - govet
     - ineffassign
     - misspell
     - nakedret
-    - nilerr
-    - revive
-    - rowserrcheck
-    - sqlclosecheck
+    - prealloc
     - staticcheck
+    - stylecheck
+    - typecheck
     - unconvert
     - unparam
     - unused
-  settings:
-    depguard:
-      rules:
-        main:
-          deny:
-            - pkg: io/ioutil
-              desc: The io/ioutil package has been deprecated, see https://go.dev/doc/go1.16#ioutil
-    godox:
-      keywords:
-        - TODO
-    revive:
-      rules:
-        - name: package-comments
-          disabled: true
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$
+    - whitespace
+
+linters-settings:
+  dogsled:
+    max-blank-identifiers: 2
+  dupl:
+    threshold: 100
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+  exhaustive:
+    default-signifies-exhaustive: false
+  gocyclo:
+    min-complexity: 15
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/shivase/changelog
+  govet:
+    enable:
+      - shadow
+  misspell:
+    locale: US
+  nakedret:
+    max-func-lines: 30
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+  unparam:
+    check-exported: false
+
 issues:
+  exclude-dirs:
+    - vendor
+    - .git
+    - .github
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+    - path: main\.go
+      linters:
+        - gocyclo
+      text: "cyclomatic complexity"
+    - linters:
+        - gosec
+      text: "G304|G306|G204"
+    - linters:
+        - gocritic
+      text: "ifElseChain"
+  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
-severity:
-  default: error
-formatters:
-  enable:
-    - gofmt
-    - goimports
-  exclusions:
-    generated: lax
-    paths:
-      - third_party$
-      - builtin$
-      - examples$

@@ -24,7 +24,7 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
 
-      - name: Install golangci-lint
+      - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.61.0

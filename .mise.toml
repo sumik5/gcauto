@@ -112,13 +112,11 @@ echo "✨ Code formatted"
 [tasks.lint]
 description = "Lint Go code"
 run = """
-if command -v golangci-lint >/dev/null 2>&1; then
-  golangci-lint run *.go --config .golangci.yaml
-elif command -v docker >/dev/null 2>&1; then
-  echo "🐳 Using golangci-lint via Docker"
-  docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:latest golangci-lint run --timeout=5m
+if command -v docker >/dev/null 2>&1; then
+  # Use v1.61.0 via docker for consistency with CI
+  docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:v1.61.0 golangci-lint run --timeout=5m
 else
-  echo "⚠️ golangci-lint not found, using go vet instead"
+  echo "⚠️ Docker not installed, using go vet instead"
   go vet ./...
 fi
 """
