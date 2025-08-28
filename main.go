@@ -134,12 +134,12 @@ func main() {
 		fmt.Println("❌ Error: Commit message is empty")
 		os.Exit(1)
 	}
-	
+
 	// Handle error responses from AI
 	lowerMsg := strings.ToLower(commitMessage)
-	if strings.Contains(lowerMsg, "execution error") || 
-	   strings.Contains(lowerMsg, "error:") ||
-	   strings.Contains(lowerMsg, "failed") {
+	if strings.Contains(lowerMsg, "execution error") ||
+		strings.Contains(lowerMsg, "error:") ||
+		strings.Contains(lowerMsg, "failed") {
 		fmt.Printf("❌ Error: AI returned an error response: %s\n", commitMessage)
 		fmt.Println("\nPossible causes:")
 		fmt.Println("  - The diff might be too large")
@@ -208,7 +208,7 @@ func generateCommitMessage(executor AIExecutor, diff string) (string, error) {
 	if len(diff) > maxDiffSize {
 		truncatedDiff = diff[:maxDiffSize] + "\n...(diff truncated for size)..."
 	}
-	
+
 	prompt := fmt.Sprintf(`以下のgitの差分情報に基づいて、Conventional Commits仕様に準拠したコミットメッセージを生成してください。
 
 差分:
@@ -276,16 +276,21 @@ func editMessageInEditor(originalMessage string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create temporary file: %w", err)
 	}
-	defer os.Remove(tmpfile.Name())
+	defer func() {
+		_ = os.Remove(tmpfile.Name())
+	}()
 
 	// Write the original message to the file
 	if _, err := tmpfile.WriteString(originalMessage); err != nil {
-		tmpfile.Close()
+		_ = tmpfile.Close()
 		return "", fmt.Errorf("failed to write to temporary file: %w", err)
 	}
-	tmpfile.Close()
+	if err := tmpfile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close temporary file: %w", err)
+	}
 
 	// Open the editor
+	// #nosec G204 - editor is from environment variable, which is expected behavior
 	cmd := exec.Command(editor, tmpfile.Name())
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
