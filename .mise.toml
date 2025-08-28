@@ -1,0 +1,136 @@
+# mise configuration for gcauto
+[tools]
+go = "1.24"
+
+[tasks.build]
+description = "Build the binary for current platform"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+go build -ldflags "-X main.version=${VERSION}" -o build/gcauto .
+echo "✅ Build complete: build/gcauto"
+"""
+
+[tasks.build-all]
+description = "Build for all supported platforms"
+depends = ["build-linux-amd64", "build-linux-arm64", "build-darwin-amd64", "build-darwin-arm64", "build-windows-amd64"]
+
+[tasks.build-linux-amd64]
+description = "Build for Linux AMD64"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=${VERSION}" -o build/gcauto-linux-amd64 .
+echo "✅ Built: build/gcauto-linux-amd64"
+"""
+
+[tasks.build-linux-arm64]
+description = "Build for Linux ARM64"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GOOS=linux GOARCH=arm64 go build -ldflags "-X main.version=${VERSION}" -o build/gcauto-linux-arm64 .
+echo "✅ Built: build/gcauto-linux-arm64"
+"""
+
+[tasks.build-darwin-amd64]
+description = "Build for macOS AMD64"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=${VERSION}" -o build/gcauto-darwin-amd64 .
+echo "✅ Built: build/gcauto-darwin-amd64"
+"""
+
+[tasks.build-darwin-arm64]
+description = "Build for macOS ARM64 (Apple Silicon)"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.version=${VERSION}" -o build/gcauto-darwin-arm64 .
+echo "✅ Built: build/gcauto-darwin-arm64"
+"""
+
+[tasks.build-windows-amd64]
+description = "Build for Windows AMD64"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+GOOS=windows GOARCH=amd64 go build -ldflags "-X main.version=${VERSION}" -o build/gcauto-windows-amd64.exe .
+echo "✅ Built: build/gcauto-windows-amd64.exe"
+"""
+
+[tasks.dev]
+description = "Development build with race detector"
+run = """
+mkdir -p build
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+go build -race -ldflags "-X main.version=${VERSION}" -o build/gcauto .
+echo "✅ Development build complete (with race detector): build/gcauto"
+"""
+
+[tasks.clean]
+description = "Remove build artifacts"
+run = """
+rm -rf build
+rm -f gcauto
+echo "🧹 Cleaned build artifacts"
+"""
+
+[tasks.install]
+description = "Install to /usr/local/bin"
+depends = ["build"]
+run = """
+sudo cp build/gcauto /usr/local/bin/
+sudo chmod +x /usr/local/bin/gcauto
+echo "✅ Installed to /usr/local/bin/gcauto"
+"""
+
+[tasks.uninstall]
+description = "Remove from /usr/local/bin"
+run = """
+sudo rm -f /usr/local/bin/gcauto
+echo "✅ Uninstalled from /usr/local/bin/gcauto"
+"""
+
+[tasks.test]
+description = "Run tests"
+run = "go test -v ./..."
+
+[tasks.run]
+description = "Build and run the application"
+depends = ["build"]
+run = "./build/gcauto"
+
+[tasks.fmt]
+description = "Format Go code"
+run = """
+go fmt ./...
+echo "✨ Code formatted"
+"""
+
+[tasks.lint]
+description = "Lint Go code"
+run = """
+if command -v golangci-lint >/dev/null 2>&1; then
+  golangci-lint run *.go --config .golangci.yaml
+elif command -v docker >/dev/null 2>&1; then
+  echo "🐳 Using golangci-lint via Docker"
+  docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:latest golangci-lint run --timeout=5m
+else
+  echo "⚠️ golangci-lint not found, using go vet instead"
+  go vet ./...
+fi
+"""
+
+[tasks.mod-update]
+description = "Update Go modules"
+run = """
+go mod tidy
+go mod download
+echo "📦 Go modules updated"
+"""
+
+[tasks.help]
+description = "Show available tasks"
+run = "mise tasks"

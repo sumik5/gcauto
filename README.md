@@ -26,6 +26,7 @@ gcautoは、ステージングされたGitの変更を分析し、AIを使用し
 - 使用するAIモデルに応じたCLIツールがインストールされ、設定済みであること
   - [Claude CLI](https://docs.anthropic.com/claude/docs/claude-cli)
   - [Gemini CLI](https://ai.google.dev/tutorials/gemini_cli_quickstart?hl=ja)
+- [mise](https://mise.jdx.dev/)（開発時のタスク管理用、オプション）
 
 ## 使い方
 
@@ -81,8 +82,13 @@ rm gcauto.zip
 git clone https://github.com/shivase/gcauto.git
 cd gcauto
 
-# ビルドしてインストール
-make install
+# miseを使用する場合（推奨）
+mise run build
+sudo cp build/gcauto /usr/local/bin/
+
+# または直接goコマンドを使用
+go build -o gcauto
+sudo mv gcauto /usr/local/bin/
 ```
 
 ### 手動インストール
@@ -100,50 +106,73 @@ sudo mv gcauto /usr/local/bin/
 
 ## コミットメッセージの形式
 
-gcautoは以下の形式でコミットメッセージを生成します：
+gcautoは[Conventional Commits](https://www.conventionalcommits.org/ja/v1.0.0/)仕様に準拠したコミットメッセージを生成します：
 
 ```
-型: 簡潔な変更内容
+<type>[(scope)]: <description>
 
-- 具体的な変更点1
-- 具体的な変更点2
-- 具体的な変更点3
+[body]
+
+[footer]
 ```
 
-型は以下から選択されます：
-- `feat`: 新機能
+利用可能なタイプ：
+- `feat`: 新機能の追加
 - `fix`: バグ修正
 - `docs`: ドキュメントのみの変更
-- `style`: コードの意味に影響を与えない変更（空白、フォーマット等）
-- `refactor`: バグ修正や機能追加を伴わないコード変更
+- `style`: コードの意味に影響しない変更（空白、フォーマット、セミコロンの欠落など）
+- `refactor`: バグ修正でも機能追加でもないコード変更
+- `perf`: パフォーマンス改善のためのコード変更
 - `test`: テストの追加や修正
-- `chore`: ビルドプロセスやツールの変更
+- `build`: ビルドシステムや外部依存関係に影響する変更
+- `ci`: CI設定ファイルとスクリプトへの変更
+- `chore`: その他の変更（srcやtestフォルダーの変更を含まない）
+- `revert`: 以前のコミットを取り消す
 
 ## 開発
+
+### セットアップ
+
+```bash
+# miseをインストール（まだの場合）
+curl https://mise.jdx.dev/install.sh | sh
+
+# miseの設定を信頼
+mise trust
+
+# 利用可能なタスクを確認
+mise tasks
+```
 
 ### ビルド
 
 ```bash
 # 現在のシステム向けビルド
-make build
+mise run build
 
 # すべてのプラットフォーム向けビルド
-make build-all
+mise run build-all
 
 # 特定のプラットフォーム向けビルド
-GOOS=linux GOARCH=arm64 make build
+mise run build-linux-arm64
 ```
 
 ### テスト
 
 ```bash
-make test
+mise run test
 ```
 
 ### Lintチェック
 
 ```bash
-make lint
+mise run lint
+```
+
+### コードフォーマット
+
+```bash
+mise run fmt
 ```
 
 ### CI/CD
@@ -164,17 +193,26 @@ git push origin v1.0.0
 ### その他のコマンド
 
 ```bash
-# ヘルプを表示
-make help
+# ヘルプを表示（利用可能なタスク一覧）
+mise tasks
 
 # クリーンアップ
-make clean
+mise run clean
+
+# インストール
+mise run install
 
 # アンインストール
-make uninstall
+mise run uninstall
 
 # 開発ビルド（race detector付き）
-make dev-build
+mise run dev
+
+# 実行
+mise run run
+
+# モジュール更新
+mise run mod-update
 ```
 
 ## プロジェクト構造
@@ -182,14 +220,15 @@ make dev-build
 ```
 gcauto/
 ├── main.go              # メインプログラム
+├── main_test.go         # テストファイル
 ├── go.mod               # Goモジュール定義
-├── Makefile             # ビルド・開発用タスク
+├── .mise.toml           # mise設定ファイル
 ├── LICENSE              # MITライセンス
 ├── README.md            # このドキュメント
 ├── .github/
 │   └── workflows/
 │       └── ci.yml       # GitHub Actions CI/CD設定
-└── .golangci.yml        # golangci-lint設定
+└── .golangci.yaml       # golangci-lint設定
 ```
 
 ## ライセンス
@@ -208,8 +247,9 @@ gcauto/
 
 ### コントリビューションガイドライン
 
-- コミットメッセージはConventional Commitsフォーマットに従ってください
-- `make lint`でLintチェックをパスすることを確認してください
+- コミットメッセージは[Conventional Commits](https://www.conventionalcommits.org/ja/v1.0.0/)フォーマットに従ってください
+- `mise run lint`でLintチェックをパスすることを確認してください
+- `mise run test`でテストが通ることを確認してください
 - 適切なテストを追加してください
 
 ## 作者
