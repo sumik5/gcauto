@@ -244,10 +244,8 @@ func TestRunPreCommit(t *testing.T) {
 				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
 					t.Errorf("runPreCommit() error = %v, want error containing %s", err, tt.errorContains)
 				}
-			} else {
-				if err != nil {
-					t.Errorf("runPreCommit() unexpected error = %v", err)
-				}
+			} else if err != nil {
+				t.Errorf("runPreCommit() unexpected error = %v", err)
 			}
 		})
 	}
