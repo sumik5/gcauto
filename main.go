@@ -123,6 +123,25 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Run pre-commit hooks before generating commit message
+	if err := runPreCommit(); err != nil {
+		fmt.Printf("\n❌ Pre-commit hook failed: %v\n", err)
+		fmt.Println("\nPlease fix the issues and try again.")
+		os.Exit(1)
+	}
+
+	// Get diff again in case pre-commit hooks modified files
+	diff, err = getStagedDiff()
+	if err != nil {
+		fmt.Printf("❌ Error: Failed to get git diff after pre-commit: %v\n", err)
+		os.Exit(1)
+	}
+
+	if diff == "" {
+		fmt.Println("✅ No changes staged for commit after pre-commit hooks. Nothing to do.")
+		os.Exit(0)
+	}
+
 	commitMessage, err := generateCommitMessage(executor, diff)
 	if err != nil {
 		fmt.Printf("❌ Error: Failed to generate commit message: %v\n", err)
@@ -313,11 +332,44 @@ func editMessageInEditor(originalMessage string) (string, error) {
 }
 
 func gitCommit(message string) error {
-	cmd := exec.Command("git", "commit", "-m", message)
+	// Use --no-verify to skip pre-commit hooks since we already ran them
+	cmd := exec.Command("git", "commit", "--no-verify", "-m", message)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
+
+func _runPreCommit() error {
+	// Check if pre-commit hook exists
+	cmd := exec.Command("git", "rev-parse", "--git-path", "hooks/pre-commit")
+	output, err := cmd.Output()
+	if err != nil {
+		// If we can't find the git hooks path, assume no pre-commit hook
+		return nil
+	}
+
+	hookPath := strings.TrimSpace(string(output))
+	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
+		// No pre-commit hook exists
+		return nil
+	}
+
+	// Run the pre-commit hook
+	fmt.Println("\n🔍 Running pre-commit hooks...")
+	cmd = exec.Command(hookPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+os.Getenv("GIT_INDEX_FILE"))
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pre-commit hook failed: %w", err)
+	}
+
+	fmt.Println("✅ Pre-commit hooks passed!")
+	return nil
+}
+
+var runPreCommit = _runPreCommit
 
 func _getStagedDiff() (string, error) {
 	cmd := exec.Command("git", "diff", "--staged")
