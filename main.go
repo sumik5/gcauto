@@ -124,8 +124,8 @@ func main() {
 	}
 
 	// Run pre-commit hooks before generating commit message
-	if err := runPreCommit(); err != nil {
-		fmt.Printf("\n❌ Pre-commit hook failed: %v\n", err)
+	if preCommitErr := runPreCommit(); preCommitErr != nil {
+		fmt.Printf("\n❌ Pre-commit hook failed: %v\n", preCommitErr)
 		fmt.Println("\nPlease fix the issues and try again.")
 		os.Exit(1)
 	}
