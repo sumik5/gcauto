@@ -159,6 +159,100 @@ func TestGitCommit(t *testing.T) {
 	}
 }
 
+func TestRunPreCommit(t *testing.T) {
+	tempDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Chdir(originalDir)
+	}()
+
+	if chdirErr := os.Chdir(tempDir); chdirErr != nil {
+		t.Fatal(chdirErr)
+	}
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init")
+	if initErr := cmd.Run(); initErr != nil {
+		t.Fatalf("Failed to initialize git repo: %v", initErr)
+	}
+
+	tests := []struct {
+		name          string
+		setupHook     bool
+		hookContent   string
+		wantError     bool
+		errorContains string
+	}{
+		{
+			name:      "no pre-commit hook",
+			setupHook: false,
+			wantError: false,
+		},
+		{
+			name:        "successful pre-commit hook",
+			setupHook:   true,
+			hookContent: "#!/bin/sh\nexit 0\n",
+			wantError:   false,
+		},
+		{
+			name:          "failing pre-commit hook",
+			setupHook:     true,
+			hookContent:   "#!/bin/sh\necho 'Pre-commit failed'\nexit 1\n",
+			wantError:     true,
+			errorContains: "pre-commit hook failed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Get hooks directory
+			cmd := exec.Command("git", "rev-parse", "--git-path", "hooks")
+			output, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("Failed to get hooks path: %v", err)
+			}
+			hooksDir := strings.TrimSpace(string(output))
+
+			// Create hooks directory if it doesn't exist
+			if mkdirErr := os.MkdirAll(hooksDir, 0o755); mkdirErr != nil {
+				t.Fatalf("Failed to create hooks directory: %v", mkdirErr)
+			}
+
+			hookPath := fmt.Sprintf("%s/pre-commit", hooksDir)
+
+			// Clean up hook after test
+			defer func() {
+				_ = os.Remove(hookPath)
+			}()
+
+			if tt.setupHook {
+				if writeErr := os.WriteFile(hookPath, []byte(tt.hookContent), 0o755); writeErr != nil {
+					t.Fatalf("Failed to create pre-commit hook: %v", writeErr)
+				}
+			}
+
+			err = _runPreCommit()
+
+			if tt.wantError {
+				if err == nil {
+					t.Errorf("runPreCommit() expected error but got none")
+					return
+				}
+				if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("runPreCommit() error = %v, want error containing %s", err, tt.errorContains)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("runPreCommit() unexpected error = %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestMainUserInput(t *testing.T) {
 	originalGetStagedDiff := getStagedDiff
 	getStagedDiff = func() (string, error) {
@@ -166,6 +260,14 @@ func TestMainUserInput(t *testing.T) {
 	}
 	defer func() {
 		getStagedDiff = originalGetStagedDiff
+	}()
+
+	originalRunPreCommit := runPreCommit
+	runPreCommit = func() error {
+		return nil
+	}
+	defer func() {
+		runPreCommit = originalRunPreCommit
 	}()
 
 	originalNewExecutor := newExecutor
@@ -238,6 +340,14 @@ func TestMainUserInput(t *testing.T) {
 }
 
 func TestMain_InvalidModel(t *testing.T) {
+	originalRunPreCommit := runPreCommit
+	runPreCommit = func() error {
+		return nil
+	}
+	defer func() {
+		runPreCommit = originalRunPreCommit
+	}()
+
 	originalNewExecutor := newExecutor
 	newExecutor = func(model string) (AIExecutor, error) {
 		return nil, fmt.Errorf("invalid model specified: %s", model)
