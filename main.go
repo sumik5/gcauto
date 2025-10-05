@@ -30,7 +30,17 @@ func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
 		}
 		return "", fmt.Errorf("failed to run claude command: %w", err)
 	}
-	return strings.TrimSpace(string(output)), nil
+
+	lines := strings.Split(string(output), "\n")
+	var filteredLines []string
+	for _, line := range lines {
+		if !strings.Contains(line, "🤖 Generated with") &&
+			!strings.Contains(line, "Co-Authored-By: Claude") {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+
+	return strings.TrimSpace(strings.Join(filteredLines, "\n")), nil
 }
 
 // GeminiExecutor implements AIExecutor for the Gemini model.
