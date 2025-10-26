@@ -350,29 +350,58 @@ func gitCommit(message string) error {
 }
 
 func _runPreCommit() error {
-	// Check if pre-commit hook exists
-	cmd := exec.Command("git", "rev-parse", "--git-path", "hooks/pre-commit")
-	output, err := cmd.Output()
-	if err != nil {
-		// If we can't find the git hooks path, assume no pre-commit hook
+	// Check if .pre-commit-config.yaml exists
+	if _, err := os.Stat(".pre-commit-config.yaml"); os.IsNotExist(err) {
+		// No pre-commit configuration file, check for git hook
+		cmd := exec.Command("git", "rev-parse", "--git-path", "hooks/pre-commit")
+		output, hookErr := cmd.Output()
+		if hookErr != nil {
+			// No pre-commit available, skip silently
+			return nil
+		}
+
+		hookPath := strings.TrimSpace(string(output))
+		if _, statErr := os.Stat(hookPath); os.IsNotExist(statErr) {
+			// No pre-commit hook exists, skip silently
+			return nil
+		}
+
+		// Git hook exists but no config file, run the hook directly
+		fmt.Println("\n🔍 Running pre-commit hook...")
+		hookCmd := exec.Command(hookPath)
+		hookCmd.Stdout = os.Stdout
+		hookCmd.Stderr = os.Stderr
+		hookCmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+os.Getenv("GIT_INDEX_FILE"))
+
+		if runErr := hookCmd.Run(); runErr != nil {
+			return fmt.Errorf("pre-commit hook failed: %w", runErr)
+		}
+
+		fmt.Println("✅ Pre-commit hook passed!")
 		return nil
 	}
 
-	hookPath := strings.TrimSpace(string(output))
-	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
-		// No pre-commit hook exists
+	// .pre-commit-config.yaml exists, check if pre-commit command is available
+	if _, err := exec.LookPath("pre-commit"); err != nil {
+		// pre-commit command not installed but config exists
+		fmt.Println("\n⚠️  .pre-commit-config.yaml found but pre-commit is not installed")
+		fmt.Println("   Skipping pre-commit hooks. Install with: pip install pre-commit")
 		return nil
 	}
 
-	// Run the pre-commit hook
+	// Run pre-commit on staged files
 	fmt.Println("\n🔍 Running pre-commit hooks...")
-	cmd = exec.Command(hookPath)
+	cmd := exec.Command("pre-commit", "run")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+os.Getenv("GIT_INDEX_FILE"))
+
+	// Get current working directory
+	if dir, err := os.Getwd(); err == nil {
+		cmd.Dir = dir
+	}
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("pre-commit hook failed: %w", err)
+		return fmt.Errorf("pre-commit hooks failed: %w", err)
 	}
 
 	fmt.Println("✅ Pre-commit hooks passed!")
