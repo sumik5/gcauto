@@ -350,8 +350,18 @@ func gitCommit(message string) error {
 }
 
 func _runPreCommit() error {
-	// Check if .pre-commit-config.yaml exists
-	if _, err := os.Stat(".pre-commit-config.yaml"); os.IsNotExist(err) {
+	// Get git repository root directory first
+	rootCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	rootOutput, err := rootCmd.Output()
+	if err != nil {
+		// Not in a git repository
+		return nil
+	}
+	rootDir := strings.TrimSpace(string(rootOutput))
+
+	// Check if .pre-commit-config.yaml exists in repository root
+	configPath := rootDir + "/.pre-commit-config.yaml"
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		// No pre-commit configuration file, check for git hook
 		cmd := exec.Command("git", "rev-parse", "--git-path", "hooks/pre-commit")
 		output, hookErr := cmd.Output()
@@ -391,14 +401,27 @@ func _runPreCommit() error {
 
 	// Run pre-commit on staged files
 	fmt.Println("\n🔍 Running pre-commit hooks...")
-	cmd := exec.Command("pre-commit", "run")
+
+	// Get list of staged files
+	stagedCmd := exec.Command("git", "diff", "--cached", "--name-only", "--diff-filter=ACM")
+	stagedCmd.Dir = rootDir
+	stagedOutput, err := stagedCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get staged files: %w", err)
+	}
+
+	stagedFiles := strings.Split(strings.TrimSpace(string(stagedOutput)), "\n")
+	if len(stagedFiles) == 0 || (len(stagedFiles) == 1 && stagedFiles[0] == "") {
+		fmt.Println("✅ No staged files to check")
+		return nil
+	}
+
+	// Run pre-commit with explicit file list
+	args := append([]string{"run", "--files"}, stagedFiles...)
+	cmd := exec.Command("pre-commit", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-
-	// Get current working directory
-	if dir, err := os.Getwd(); err == nil {
-		cmd.Dir = dir
-	}
+	cmd.Dir = rootDir
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("pre-commit hooks failed: %w", err)
