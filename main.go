@@ -21,7 +21,8 @@ type ClaudeExecutor struct{}
 
 // Execute runs the claude command with the given prompt.
 func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p", prompt)
+	cmd := exec.Command("claude", "-p")
+	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
