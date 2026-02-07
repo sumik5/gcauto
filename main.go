@@ -153,7 +153,20 @@ func main() {
 		os.Exit(0)
 	}
 
-	commitMessage, err := generateCommitMessage(executor, diff)
+	// Get file list and stat (non-fatal if these fail)
+	fileList, fileListErr := getStagedFileList()
+	if fileListErr != nil {
+		fmt.Printf("⚠️ Warning: Failed to get staged file list: %v\n", fileListErr)
+		fileList = ""
+	}
+
+	stat, statErr := getStagedDiffStat()
+	if statErr != nil {
+		fmt.Printf("⚠️ Warning: Failed to get diff stat: %v\n", statErr)
+		stat = ""
+	}
+
+	commitMessage, err := generateCommitMessage(executor, diff, fileList, stat)
 	if err != nil {
 		fmt.Printf("❌ Error: Failed to generate commit message: %v\n", err)
 		os.Exit(1)
@@ -231,16 +244,33 @@ func main() {
 	}
 }
 
-func generateCommitMessage(executor AIExecutor, diff string) (string, error) {
+func generateCommitMessage(executor AIExecutor, diff string, fileList string, stat string) (string, error) {
 	// Limit diff size to prevent issues with command line argument limits
-	maxDiffSize := 6000
+	maxDiffSize := 50000
 	truncatedDiff := diff
+	wasTruncated := false
 	if len(diff) > maxDiffSize {
 		truncatedDiff = diff[:maxDiffSize] + "\n...(diff truncated for size)..."
+		wasTruncated = true
+	}
+
+	truncationNote := ""
+	if wasTruncated {
+		truncationNote = "\n注意: 差分が大きいため一部省略されています。ファイル一覧と変更統計を参考に、全体像を把握してください。"
 	}
 
 	prompt := fmt.Sprintf(`以下のgitの差分情報に基づいて、Conventional Commits仕様に準拠したコミットメッセージを生成してください。
 
+変更ファイル一覧:
+---
+%s
+---
+
+変更統計:
+---
+%s
+---
+%s
 差分:
 ---
 %s
@@ -289,7 +319,7 @@ BREAKING CHANGE:
 - 絶対に最初の行（<type>行）より前に説明文を付けない
 - コミットメッセージ本文のみを出力（説明や前置きは一切不要）
 - バッククォート（三つの連続したバッククォート）やコードブロック記号は使用禁止
-- マークダウン記法は使用せず、プレーンテキストとして出力`, truncatedDiff)
+- マークダウン記法は使用せず、プレーンテキストとして出力`, fileList, stat, truncationNote, truncatedDiff)
 
 	return executor.Execute(prompt)
 }
@@ -444,3 +474,25 @@ func _getStagedDiff() (string, error) {
 }
 
 var getStagedDiff = _getStagedDiff
+
+func _getStagedFileList() (string, error) {
+	cmd := exec.Command("git", "diff", "--staged", "--name-only")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+var getStagedFileList = _getStagedFileList
+
+func _getStagedDiffStat() (string, error) {
+	cmd := exec.Command("git", "diff", "--staged", "--stat")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+var getStagedDiffStat = _getStagedDiffStat

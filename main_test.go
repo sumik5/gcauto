@@ -28,31 +28,55 @@ func TestGenerateCommitMessage(t *testing.T) {
 		name         string
 		mockResponse string
 		mockError    error
+		diff         string
+		fileList     string
+		stat         string
 		wantError    bool
 		wantEmpty    bool
 	}{
 		{
 			name:         "valid conventional commit message",
 			mockResponse: "feat: 新しい機能を追加\n\n- 機能1を追加\n- 機能2を追加",
+			diff:         "fake diff",
+			fileList:     "main.go\nREADME.md",
+			stat:         "main.go | 10 ++++++++++\nREADME.md | 5 +++++",
 			wantError:    false,
 			wantEmpty:    false,
 		},
 		{
 			name:         "fix type commit message",
 			mockResponse: "fix: バグを修正",
+			diff:         "fake diff",
+			fileList:     "main.go",
+			stat:         "main.go | 2 +-",
 			wantError:    false,
 			wantEmpty:    false,
 		},
 		{
 			name:      "error from ai",
 			mockError: os.ErrNotExist,
+			diff:      "fake diff",
+			fileList:  "",
+			stat:      "",
 			wantError: true,
 		},
 		{
 			name:         "empty response",
 			mockResponse: "",
+			diff:         "fake diff",
+			fileList:     "",
+			stat:         "",
 			wantError:    false,
 			wantEmpty:    true,
+		},
+		{
+			name:         "truncated diff with warning",
+			mockResponse: "feat: 大規模なリファクタリング",
+			diff:         strings.Repeat("a", 60000), // Exceeds maxDiffSize (50000)
+			fileList:     "file1.go\nfile2.go\nfile3.go",
+			stat:         "file1.go | 100 +++++++\nfile2.go | 200 +++++++\nfile3.go | 300 ++++++",
+			wantError:    false,
+			wantEmpty:    false,
 		},
 	}
 
@@ -63,7 +87,7 @@ func TestGenerateCommitMessage(t *testing.T) {
 				MockError:    tt.mockError,
 			}
 
-			message, err := generateCommitMessage(executor, "fake diff")
+			message, err := generateCommitMessage(executor, tt.diff, tt.fileList, tt.stat)
 
 			if tt.wantError {
 				if err == nil {
@@ -258,6 +282,22 @@ func TestMainUserInput(t *testing.T) {
 	}
 	defer func() {
 		getStagedDiff = originalGetStagedDiff
+	}()
+
+	originalGetStagedFileList := getStagedFileList
+	getStagedFileList = func() (string, error) {
+		return "main.go\nREADME.md", nil
+	}
+	defer func() {
+		getStagedFileList = originalGetStagedFileList
+	}()
+
+	originalGetStagedDiffStat := getStagedDiffStat
+	getStagedDiffStat = func() (string, error) {
+		return "main.go | 10 ++++++++++\nREADME.md | 5 +++++", nil
+	}
+	defer func() {
+		getStagedDiffStat = originalGetStagedDiffStat
 	}()
 
 	originalRunPreCommit := runPreCommit
