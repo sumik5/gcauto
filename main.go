@@ -318,8 +318,17 @@ func extractCommitMessage(raw string) string {
 		return raw
 	}
 
-	// Extract from the conventional commit line onwards
-	extracted := strings.Join(lines[startIndex:], "\n")
+	// Extract from the conventional commit line onwards, but stop at code block end markers
+	var extractedLines []string
+	for _, line := range lines[startIndex:] {
+		trimmedLine := strings.TrimSpace(line)
+		// バッククォート3つのみの行で切断（AIがコードブロック終端として出力したもの）
+		if trimmedLine == "```" {
+			break
+		}
+		extractedLines = append(extractedLines, line)
+	}
+	extracted := strings.Join(extractedLines, "\n")
 
 	// Trim trailing "---" and empty lines
 	extracted = strings.TrimSpace(extracted)
