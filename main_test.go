@@ -82,6 +82,16 @@ feat(skills): 13個の新スキル追加とREADME自動同期ルール整備
 			input:    "feat!: 破壊的変更を伴う新機能",
 			expected: "feat!: 破壊的変更を伴う新機能",
 		},
+		{
+			name:     "message with trailing backticks and AI commentary",
+			input:    "feat(vcs): Jujutsu対応追加\n\n変更内容:\n  - VCS検出機能追加\n  - jj diff対応\n```\n\nこのメッセージで...",
+			expected: "feat(vcs): Jujutsu対応追加\n\n変更内容:\n  - VCS検出機能追加\n  - jj diff対応",
+		},
+		{
+			name:     "message with only trailing backticks",
+			input:    "fix: バグ修正\n\n- 修正内容\n```",
+			expected: "fix: バグ修正\n\n- 修正内容",
+		},
 	}
 
 	for _, tt := range tests {
