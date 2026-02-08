@@ -11,6 +11,14 @@ import (
 	"strings"
 )
 
+// VCSType represents the version control system type.
+type VCSType int
+
+const (
+	VCSGit VCSType = iota
+	VCSJujutsu
+)
+
 // AIExecutor defines the interface for executing AI models.
 type AIExecutor interface {
 	Execute(prompt string) (string, error)
@@ -82,6 +90,18 @@ var newExecutor = func(model string) (AIExecutor, error) {
 	}
 }
 
+// _detectVCS detects the version control system type.
+// It checks if the current directory is a Jujutsu repository by running "jj root".
+func _detectVCS() VCSType {
+	cmd := exec.Command("jj", "root")
+	if err := cmd.Run(); err != nil {
+		return VCSGit
+	}
+	return VCSJujutsu
+}
+
+var detectVCSFn = _detectVCS
+
 var version = "dev" // Can be set during build
 
 func main() {
@@ -123,44 +143,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	diff, err := getStagedDiff()
+	// VCS detection
+	vcs := detectVCSFn()
+
+	// Select VCS-specific functions
+	var getDiff func() (string, error)
+	var getFileList func() (string, error)
+	var getDiffStat func() (string, error)
+	var commitFn func(string) error
+
+	switch vcs {
+	case VCSJujutsu:
+		fmt.Println("📦 Detected Jujutsu repository")
+		getDiff = getJJDiff
+		getFileList = getJJFileList
+		getDiffStat = getJJDiffStat
+		commitFn = jjCommit
+	case VCSGit:
+		fmt.Println("📦 Detected Git repository")
+		getDiff = getStagedDiff
+		getFileList = getStagedFileList
+		getDiffStat = getStagedDiffStat
+		commitFn = gitCommit
+	}
+
+	diff, err := getDiff()
 	if err != nil {
-		fmt.Printf("❌ Error: Failed to get git diff: %v\n", err)
+		fmt.Printf("❌ Error: Failed to get diff: %v\n", err)
 		os.Exit(1)
 	}
 
 	if diff == "" {
-		fmt.Println("✅ No changes staged for commit. Nothing to do.")
+		if vcs == VCSJujutsu {
+			fmt.Println("✅ No changes in current working copy. Nothing to do.")
+		} else {
+			fmt.Println("✅ No changes staged for commit. Nothing to do.")
+		}
 		os.Exit(0)
 	}
 
-	// Run pre-commit hooks before generating commit message
-	if preCommitErr := runPreCommit(); preCommitErr != nil {
-		fmt.Printf("\n❌ Pre-commit hook failed: %v\n", preCommitErr)
-		fmt.Println("\nPlease fix the issues and try again.")
-		os.Exit(1)
-	}
+	// Run pre-commit hooks before generating commit message (only for Git)
+	if vcs == VCSGit {
+		if preCommitErr := runPreCommit(); preCommitErr != nil {
+			fmt.Printf("\n❌ Pre-commit hook failed: %v\n", preCommitErr)
+			fmt.Println("\nPlease fix the issues and try again.")
+			os.Exit(1)
+		}
 
-	// Get diff again in case pre-commit hooks modified files
-	diff, err = getStagedDiff()
-	if err != nil {
-		fmt.Printf("❌ Error: Failed to get git diff after pre-commit: %v\n", err)
-		os.Exit(1)
-	}
+		// Get diff again in case pre-commit hooks modified files
+		diff, err = getDiff()
+		if err != nil {
+			fmt.Printf("❌ Error: Failed to get diff after pre-commit: %v\n", err)
+			os.Exit(1)
+		}
 
-	if diff == "" {
-		fmt.Println("✅ No changes staged for commit after pre-commit hooks. Nothing to do.")
-		os.Exit(0)
+		if diff == "" {
+			fmt.Println("✅ No changes staged for commit after pre-commit hooks. Nothing to do.")
+			os.Exit(0)
+		}
 	}
 
 	// Get file list and stat (non-fatal if these fail)
-	fileList, fileListErr := getStagedFileList()
+	fileList, fileListErr := getFileList()
 	if fileListErr != nil {
-		fmt.Printf("⚠️ Warning: Failed to get staged file list: %v\n", fileListErr)
+		fmt.Printf("⚠️ Warning: Failed to get file list: %v\n", fileListErr)
 		fileList = ""
 	}
 
-	stat, statErr := getStagedDiffStat()
+	stat, statErr := getDiffStat()
 	if statErr != nil {
 		fmt.Printf("⚠️ Warning: Failed to get diff stat: %v\n", statErr)
 		stat = ""
@@ -215,7 +265,7 @@ func main() {
 
 		switch response {
 		case "y", "yes":
-			if err := gitCommit(commitMessage); err != nil {
+			if err := commitFn(commitMessage); err != nil {
 				fmt.Printf("\n❌ Commit failed: %v\n", err)
 				os.Exit(1)
 			}
@@ -296,7 +346,7 @@ func generateCommitMessage(executor AIExecutor, diff, fileList, stat string) (st
 		truncationNote = "\n注意: 差分が大きいため一部省略されています。ファイル一覧と変更統計を参考に、全体像を把握してください。"
 	}
 
-	prompt := fmt.Sprintf(`以下のgitの差分情報に基づいて、Conventional Commits仕様に準拠したコミットメッセージを生成してください。
+	prompt := fmt.Sprintf(`以下の差分情報に基づいて、Conventional Commits仕様に準拠したコミットメッセージを生成してください。
 
 変更ファイル一覧:
 ---
@@ -537,3 +587,62 @@ func _getStagedDiffStat() (string, error) {
 }
 
 var getStagedDiffStat = _getStagedDiffStat
+
+func _getJJDiff() (string, error) {
+	cmd := exec.Command("jj", "diff")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+var getJJDiff = _getJJDiff
+
+func _getJJFileList() (string, error) {
+	cmd := exec.Command("jj", "diff", "--summary")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return parseJJSummary(string(output)), nil
+}
+
+var getJJFileList = _getJJFileList
+
+// parseJJSummary parses "jj diff --summary" output to extract file names.
+// Each line is like "M path/to/file" or "A path/to/file".
+func parseJJSummary(summary string) string {
+	lines := strings.Split(strings.TrimSpace(summary), "\n")
+	var files []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Format: "M path/to/file" or "A path/to/file" or "D path/to/file"
+		parts := strings.SplitN(line, " ", 2)
+		if len(parts) == 2 {
+			files = append(files, strings.TrimSpace(parts[1]))
+		}
+	}
+	return strings.Join(files, "\n")
+}
+
+func _getJJDiffStat() (string, error) {
+	cmd := exec.Command("jj", "diff", "--stat")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+var getJJDiffStat = _getJJDiffStat
+
+func jjCommit(message string) error {
+	cmd := exec.Command("jj", "commit", "-m", message)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
