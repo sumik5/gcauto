@@ -23,6 +23,77 @@ func (m *MockAIExecutor) Execute(prompt string) (string, error) {
 	return m.MockResponse, nil
 }
 
+func TestExtractCommitMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name: "with preamble and separator",
+			input: `差分の内容を確認したッ！この変更の全体像を把握するために...
+
+★ Insight ─────────────────────────────────────
+...
+─────────────────────────────────────────────────
+
+以下がConventional Commits仕様に準拠したコミットメッセージだッ！
+
+---
+
+feat(skills): 13個の新スキル追加とREADME自動同期ルール整備
+
+スキルの拡充とドキュメント整備:
+  - 13個の新しいスキルを追加
+  - README自動同期ルール整備`,
+			expected: `feat(skills): 13個の新スキル追加とREADME自動同期ルール整備
+
+スキルの拡充とドキュメント整備:
+  - 13個の新しいスキルを追加
+  - README自動同期ルール整備`,
+		},
+		{
+			name:     "clean message without preamble",
+			input:    "feat(auth): ユーザー認証機能を追加\n\n認証システムの実装:\n  - JWTトークンベースの認証",
+			expected: "feat(auth): ユーザー認証機能を追加\n\n認証システムの実装:\n  - JWTトークンベースの認証",
+		},
+		{
+			name:     "message with body",
+			input:    "fix: ログインバグ修正\n\n- セッションタイムアウトを修正\n- エラーハンドリング改善",
+			expected: "fix: ログインバグ修正\n\n- セッションタイムアウトを修正\n- エラーハンドリング改善",
+		},
+		{
+			name:     "message with trailing separator",
+			input:    "feat(ui): 新しいUIコンポーネント追加\n\n- ボタンコンポーネント作成\n---",
+			expected: "feat(ui): 新しいUIコンポーネント追加\n\n- ボタンコンポーネント作成",
+		},
+		{
+			name:     "no conventional commit line (fallback)",
+			input:    "これはConventional Commitではない単なるテキストです",
+			expected: "これはConventional Commitではない単なるテキストです",
+		},
+		{
+			name:     "scope-less commit",
+			input:    "fix: バグ修正",
+			expected: "fix: バグ修正",
+		},
+		{
+			name:     "breaking change marker",
+			input:    "feat!: 破壊的変更を伴う新機能",
+			expected: "feat!: 破壊的変更を伴う新機能",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := extractCommitMessage(tt.input)
+			if actual != tt.expected {
+				t.Errorf("extractCommitMessage() = %q, want %q", actual, tt.expected)
+			}
+		})
+	}
+}
+
 func TestGenerateCommitMessage(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -78,6 +149,26 @@ func TestGenerateCommitMessage(t *testing.T) {
 			wantError:    false,
 			wantEmpty:    false,
 		},
+		{
+			name: "message with preamble gets extracted",
+			mockResponse: `AIによる解説文がここに入ります。
+
+★ Insight ─────────────────
+分析結果など
+─────────────────────────────
+
+---
+
+feat(api): 新しいAPIエンドポイント追加
+
+APIの拡充:
+  - ユーザー検索エンドポイント追加`,
+			diff:      "fake diff",
+			fileList:  "api.go",
+			stat:      "api.go | 50 ++++++++++",
+			wantError: false,
+			wantEmpty: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -112,10 +203,11 @@ func TestGenerateCommitMessage(t *testing.T) {
 				t.Error("generateCommitMessage() returned empty message")
 			}
 
-			conventionalTypes := []string{"feat:", "fix:", "docs:", "style:", "refactor:", "test:", "chore:"}
+			conventionalTypes := []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}
 			hasValidType := false
 			for _, typ := range conventionalTypes {
-				if strings.HasPrefix(message, typ) {
+				// Check for patterns: type(, type:, type!
+				if strings.HasPrefix(message, typ+"(") || strings.HasPrefix(message, typ+":") || strings.HasPrefix(message, typ+"!") {
 					hasValidType = true
 					break
 				}

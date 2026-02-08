@@ -244,6 +244,43 @@ func main() {
 	}
 }
 
+func extractCommitMessage(raw string) string {
+	lines := strings.Split(raw, "\n")
+	conventionalTypes := []string{"feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore", "revert"}
+
+	startIndex := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		for _, typ := range conventionalTypes {
+			// Check for patterns: type(scope):, type:, type!
+			if strings.HasPrefix(trimmed, typ+"(") || strings.HasPrefix(trimmed, typ+":") || strings.HasPrefix(trimmed, typ+"!") {
+				startIndex = i
+				break
+			}
+		}
+		if startIndex != -1 {
+			break
+		}
+	}
+
+	// Fallback: return original if no conventional commit line found
+	if startIndex == -1 {
+		return raw
+	}
+
+	// Extract from the conventional commit line onwards
+	extracted := strings.Join(lines[startIndex:], "\n")
+
+	// Trim trailing "---" and empty lines
+	extracted = strings.TrimSpace(extracted)
+	for strings.HasSuffix(extracted, "---") {
+		extracted = strings.TrimSuffix(extracted, "---")
+		extracted = strings.TrimSpace(extracted)
+	}
+
+	return extracted
+}
+
 func generateCommitMessage(executor AIExecutor, diff string, fileList string, stat string) (string, error) {
 	// Limit diff size to prevent issues with command line argument limits
 	maxDiffSize := 50000
@@ -321,7 +358,11 @@ BREAKING CHANGE:
 - バッククォート（三つの連続したバッククォート）やコードブロック記号は使用禁止
 - マークダウン記法は使用せず、プレーンテキストとして出力`, fileList, stat, truncationNote, truncatedDiff)
 
-	return executor.Execute(prompt)
+	raw, err := executor.Execute(prompt)
+	if err != nil {
+		return "", err
+	}
+	return extractCommitMessage(raw), nil
 }
 
 func editMessageInEditor(originalMessage string) (string, error) {
