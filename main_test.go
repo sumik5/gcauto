@@ -368,6 +368,14 @@ func TestRunPreCommit(t *testing.T) {
 }
 
 func TestMainUserInput(t *testing.T) {
+	originalDetectVCSFn := detectVCSFn
+	detectVCSFn = func() VCSType {
+		return VCSGit
+	}
+	defer func() {
+		detectVCSFn = originalDetectVCSFn
+	}()
+
 	originalGetStagedDiff := getStagedDiff
 	getStagedDiff = func() (string, error) {
 		return "fake diff for main user input test", nil
@@ -469,7 +477,61 @@ func TestMainUserInput(t *testing.T) {
 	}
 }
 
+func TestParseJJSummary(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "modified and added files",
+			input:    "M src/main.go\nA src/new.go\nD src/old.go\n",
+			expected: "src/main.go\nsrc/new.go\nsrc/old.go",
+		},
+		{
+			name:     "empty summary",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "single file",
+			input:    "M README.md\n",
+			expected: "README.md",
+		},
+		{
+			name:     "files with spaces in path",
+			input:    "M path/to/file with spaces.txt\nA another file.go\n",
+			expected: "path/to/file with spaces.txt\nanother file.go",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := parseJJSummary(tt.input)
+			if actual != tt.expected {
+				t.Errorf("parseJJSummary() = %q, want %q", actual, tt.expected)
+			}
+		})
+	}
+}
+
+func TestDetectVCS(t *testing.T) {
+	// Test default implementation (requires jj to be installed for full test)
+	// This test will pass regardless of jj availability
+	vcs := _detectVCS()
+	if vcs != VCSGit && vcs != VCSJujutsu {
+		t.Errorf("detectVCS() returned invalid VCS type: %v", vcs)
+	}
+}
+
 func TestMain_InvalidModel(t *testing.T) {
+	originalDetectVCSFn := detectVCSFn
+	detectVCSFn = func() VCSType {
+		return VCSGit
+	}
+	defer func() {
+		detectVCSFn = originalDetectVCSFn
+	}()
+
 	originalRunPreCommit := runPreCommit
 	runPreCommit = func() error {
 		return nil
