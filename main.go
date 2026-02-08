@@ -281,7 +281,7 @@ func extractCommitMessage(raw string) string {
 	return extracted
 }
 
-func generateCommitMessage(executor AIExecutor, diff string, fileList string, stat string) (string, error) {
+func generateCommitMessage(executor AIExecutor, diff, fileList, stat string) (string, error) {
 	// Limit diff size to prevent issues with command line argument limits
 	maxDiffSize := 50000
 	truncatedDiff := diff
@@ -433,7 +433,7 @@ func _runPreCommit() error {
 
 	// Check if .pre-commit-config.yaml exists in repository root
 	configPath := rootDir + "/.pre-commit-config.yaml"
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 		// No pre-commit configuration file, check for git hook
 		cmd := exec.Command("git", "rev-parse", "--git-path", "hooks/pre-commit")
 		output, hookErr := cmd.Output()
@@ -464,7 +464,7 @@ func _runPreCommit() error {
 	}
 
 	// .pre-commit-config.yaml exists, check if pre-commit command is available
-	if _, err := exec.LookPath("pre-commit"); err != nil {
+	if _, lookErr := exec.LookPath("pre-commit"); lookErr != nil {
 		// pre-commit command not installed but config exists
 		fmt.Println("\n⚠️  .pre-commit-config.yaml found but pre-commit is not installed")
 		fmt.Println("   Skipping pre-commit hooks. Install with: pip install pre-commit")

@@ -1,98 +1,105 @@
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
   enable:
     - bodyclose
     - dogsled
     - dupl
-    - errcheck
     - exhaustive
     - gochecknoinits
     - goconst
     - gocritic
     - gocyclo
-    - gofmt
-    - goimports
     - gosec
-    - gosimple
-    - govet
-    - ineffassign
     - misspell
     - nakedret
     - prealloc
     - staticcheck
-    - stylecheck
-    - typecheck
     - unconvert
     - unparam
-    - unused
     - whitespace
-
-linters-settings:
-  dogsled:
-    max-blank-identifiers: 2
-  dupl:
-    threshold: 100
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  exhaustive:
-    default-signifies-exhaustive: false
-  gocyclo:
-    min-complexity: 15
-  goconst:
-    min-len: 2
-    min-occurrences: 2
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-  gofmt:
-    simplify: true
-  goimports:
-    local-prefixes: github.com/shivase/changelog
-  govet:
-    enable:
-      - shadow
-  misspell:
-    locale: US
-  nakedret:
-    max-func-lines: 30
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: false
-  unparam:
-    check-exported: false
-
+  settings:
+    dogsled:
+      max-blank-identifiers: 2
+    dupl:
+      threshold: 100
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    exhaustive:
+      default-signifies-exhaustive: false
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gocyclo:
+      min-complexity: 15
+    govet:
+      enable:
+        - shadow
+    misspell:
+      locale: US
+    nakedret:
+      max-func-lines: 30
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+    unparam:
+      check-exported: false
+  exclusions:
+    generated: lax
+    rules:
+      - linters:
+          - dupl
+          - errcheck
+          - goconst
+          - gocyclo
+          - gosec
+        path: _test\.go
+      - linters:
+          - gocyclo
+        path: main\.go
+        text: cyclomatic complexity
+      - linters:
+          - gosec
+        text: G304|G306|G204
+      - linters:
+          - gocritic
+        text: ifElseChain
+    paths:
+      - vendor
+      - .git
+      - .github
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-dirs:
-    - vendor
-    - .git
-    - .github
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-        - goconst
-    - path: main\.go
-      linters:
-        - gocyclo
-      text: "cyclomatic complexity"
-    - linters:
-        - gosec
-      text: "G304|G306|G204"
-    - linters:
-        - gocritic
-      text: "ifElseChain"
-  exclude-use-default: false
   max-issues-per-linter: 0
   max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    gofmt:
+      simplify: true
+    goimports:
+      local-prefixes:
+        - github.com/shivase/changelog
+  exclusions:
+    generated: lax
+    paths:
+      - vendor
+      - .git
+      - .github
+      - third_party$
+      - builtin$
+      - examples$

@@ -109,14 +109,20 @@ go fmt ./...
 echo "✨ Code formatted"
 """
 
+[tasks.check-all]
+description = "Run all checks (test, lint, fmt)"
+depends = ["test", "lint", "fmt"]
+
 [tasks.lint]
 description = "Lint Go code"
 run = """
-if command -v docker >/dev/null 2>&1; then
-  # Use v1.61.0 via docker for consistency with CI
-  docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:v1.61.0 golangci-lint run --timeout=5m
+if command -v golangci-lint >/dev/null 2>&1; then
+  golangci-lint run
+elif command -v docker >/dev/null 2>&1; then
+  echo "⚠️ golangci-lint not found, using Docker..."
+  docker run --rm -v $(pwd):/app -w /app golangci/golangci-lint:v2.8.0 golangci-lint run
 else
-  echo "⚠️ Docker not installed, using go vet instead"
+  echo "⚠️ golangci-lint and Docker not installed, using go vet instead"
   go vet ./...
 fi
 """
