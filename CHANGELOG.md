@@ -1,6 +1,21 @@
 # Changelog
 
----
+## [v1.8.1] - 2026-02-09
+
+### 追加
+
+- SIGINT/SIGTERMシグナルによるグレースフルシャットダウン機能を追加
+- 処理中にCtrl+Cで中断した際、子プロセス（AI CLI）も含めて安全に終了するように対応
+- コンテキストキャンセル時のテストケースを追加（`TestGenerateCommitMessageContextCanceled`, `TestAIExecutorContextCanceled`）
+
+### 変更
+
+- 全関数に`context.Context`を伝播し、外部コマンド実行を`exec.CommandContext`に統一
+- AIExecutorインターフェースの`Execute`メソッドに`context.Context`パラメータを追加
+
+### 削除
+
+- ドキュメント画像`docs/command_image.png`を削除
 
 ## [v1.8.0] - 2026-02-09
 

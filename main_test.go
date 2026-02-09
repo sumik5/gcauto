@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -16,7 +17,7 @@ type MockAIExecutor struct {
 }
 
 // Execute returns the mock response or error.
-func (m *MockAIExecutor) Execute(prompt string) (string, error) {
+func (m *MockAIExecutor) Execute(ctx context.Context, prompt string) (string, error) {
 	if m.MockError != nil {
 		return "", m.MockError
 	}
@@ -188,7 +189,7 @@ APIの拡充:
 				MockError:    tt.mockError,
 			}
 
-			message, err := generateCommitMessage(executor, tt.diff, tt.fileList, tt.stat)
+			message, err := generateCommitMessage(context.Background(), executor, tt.diff, tt.fileList, tt.stat)
 
 			if tt.wantError {
 				if err == nil {
@@ -269,7 +270,7 @@ func TestGitCommit(t *testing.T) {
 		t.Fatalf("Failed to add file: %v", addErr)
 	}
 
-	err = gitCommit("test: テストコミット")
+	err = gitCommit(context.Background(), "test: テストコミット")
 	if err != nil {
 		t.Errorf("gitCommit() error = %v", err)
 	}
@@ -360,7 +361,7 @@ func TestRunPreCommit(t *testing.T) {
 				}
 			}
 
-			err = _runPreCommit()
+			err = _runPreCommit(context.Background())
 
 			if tt.wantError {
 				if err == nil {
@@ -379,7 +380,7 @@ func TestRunPreCommit(t *testing.T) {
 
 func TestMainUserInput(t *testing.T) {
 	originalDetectVCSFn := detectVCSFn
-	detectVCSFn = func() VCSType {
+	detectVCSFn = func(ctx context.Context) VCSType {
 		return VCSGit
 	}
 	defer func() {
@@ -387,7 +388,7 @@ func TestMainUserInput(t *testing.T) {
 	}()
 
 	originalGetStagedDiff := getStagedDiff
-	getStagedDiff = func() (string, error) {
+	getStagedDiff = func(ctx context.Context) (string, error) {
 		return "fake diff for main user input test", nil
 	}
 	defer func() {
@@ -395,7 +396,7 @@ func TestMainUserInput(t *testing.T) {
 	}()
 
 	originalGetStagedFileList := getStagedFileList
-	getStagedFileList = func() (string, error) {
+	getStagedFileList = func(ctx context.Context) (string, error) {
 		return "main.go\nREADME.md", nil
 	}
 	defer func() {
@@ -403,7 +404,7 @@ func TestMainUserInput(t *testing.T) {
 	}()
 
 	originalGetStagedDiffStat := getStagedDiffStat
-	getStagedDiffStat = func() (string, error) {
+	getStagedDiffStat = func(ctx context.Context) (string, error) {
 		return "main.go | 10 ++++++++++\nREADME.md | 5 +++++", nil
 	}
 	defer func() {
@@ -411,7 +412,7 @@ func TestMainUserInput(t *testing.T) {
 	}()
 
 	originalRunPreCommit := runPreCommit
-	runPreCommit = func() error {
+	runPreCommit = func(ctx context.Context) error {
 		return nil
 	}
 	defer func() {
@@ -527,7 +528,7 @@ func TestParseJJSummary(t *testing.T) {
 func TestDetectVCS(t *testing.T) {
 	// Test default implementation (requires jj to be installed for full test)
 	// This test will pass regardless of jj availability
-	vcs := _detectVCS()
+	vcs := _detectVCS(context.Background())
 	if vcs != VCSGit && vcs != VCSJujutsu {
 		t.Errorf("detectVCS() returned invalid VCS type: %v", vcs)
 	}
@@ -703,7 +704,7 @@ func TestMainAutoConfirmWithYesFlag(t *testing.T) {
 
 func TestMain_InvalidModel(t *testing.T) {
 	originalDetectVCSFn := detectVCSFn
-	detectVCSFn = func() VCSType {
+	detectVCSFn = func(ctx context.Context) VCSType {
 		return VCSGit
 	}
 	defer func() {
@@ -711,7 +712,7 @@ func TestMain_InvalidModel(t *testing.T) {
 	}()
 
 	originalRunPreCommit := runPreCommit
-	runPreCommit = func() error {
+	runPreCommit = func(ctx context.Context) error {
 		return nil
 	}
 	defer func() {
@@ -760,5 +761,47 @@ func TestMain_InvalidModel(t *testing.T) {
 	expectedError := "invalid model specified: invalid"
 	if !strings.Contains(string(output), expectedError) {
 		t.Errorf("Expected output to contain '%s', but got '%s'", expectedError, string(output))
+	}
+}
+
+func TestGenerateCommitMessageContextCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	executor := &MockAIExecutor{
+		MockError: context.Canceled,
+	}
+
+	_, err := generateCommitMessage(ctx, executor, "fake diff", "file.go", "file.go | 10 ++++++++++")
+	if err == nil {
+		t.Error("generateCommitMessage() expected error when context is canceled, but got none")
+	}
+}
+
+func TestAIExecutorContextCanceled(t *testing.T) {
+	tests := []struct {
+		name     string
+		executor AIExecutor
+	}{
+		{
+			name:     "ClaudeExecutor with canceled context",
+			executor: &ClaudeExecutor{},
+		},
+		{
+			name:     "GeminiExecutor with canceled context",
+			executor: &GeminiExecutor{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel() // Cancel immediately
+
+			_, err := tt.executor.Execute(ctx, "test prompt")
+			if err == nil {
+				t.Error("Execute() expected error when context is canceled, but got none")
+			}
+		})
 	}
 }

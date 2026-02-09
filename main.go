@@ -3,12 +3,15 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 // VCSType represents the version control system type.
@@ -21,15 +24,15 @@ const (
 
 // AIExecutor defines the interface for executing AI models.
 type AIExecutor interface {
-	Execute(prompt string) (string, error)
+	Execute(ctx context.Context, prompt string) (string, error)
 }
 
 // ClaudeExecutor implements AIExecutor for the Claude model.
 type ClaudeExecutor struct{}
 
 // Execute runs the claude command with the given prompt.
-func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
-	cmd := exec.Command("claude", "-p")
+func (e *ClaudeExecutor) Execute(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "claude", "-p")
 	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
 	if err != nil {
@@ -56,9 +59,9 @@ func (e *ClaudeExecutor) Execute(prompt string) (string, error) {
 type GeminiExecutor struct{}
 
 // Execute runs the gemini command with the given prompt.
-func (e *GeminiExecutor) Execute(prompt string) (string, error) {
+func (e *GeminiExecutor) Execute(ctx context.Context, prompt string) (string, error) {
 	// Assuming gemini command has a similar interface to claude.
-	cmd := exec.Command("gemini", "-p", prompt)
+	cmd := exec.CommandContext(ctx, "gemini", "-p", prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -92,8 +95,8 @@ var newExecutor = func(model string) (AIExecutor, error) {
 
 // _detectVCS detects the version control system type.
 // It checks if the current directory is a Jujutsu repository by running "jj root".
-func _detectVCS() VCSType {
-	cmd := exec.Command("jj", "root")
+func _detectVCS(ctx context.Context) VCSType {
+	cmd := exec.CommandContext(ctx, "jj", "root")
 	if err := cmd.Run(); err != nil {
 		return VCSGit
 	}
@@ -139,22 +142,27 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Signal handling: create context that cancels on SIGINT/SIGTERM
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+
 	fmt.Printf("🚀 gcauto: Starting automatic commit process using %s...\n", *model)
 
 	executor, err := newExecutor(*model)
 	if err != nil {
 		fmt.Printf("❌ Error: %v\n", err)
-		os.Exit(1)
+		cancel()   // Cleanup before exit
+		os.Exit(1) // nolint:gocritic // cancel() is explicitly called before exit
 	}
 
 	// VCS detection
-	vcs := detectVCSFn()
+	vcs := detectVCSFn(ctx)
 
 	// Select VCS-specific functions
-	var getDiff func() (string, error)
-	var getFileList func() (string, error)
-	var getDiffStat func() (string, error)
-	var commitFn func(string) error
+	var getDiff func(context.Context) (string, error)
+	var getFileList func(context.Context) (string, error)
+	var getDiffStat func(context.Context) (string, error)
+	var commitFn func(context.Context, string) error
 
 	switch vcs {
 	case VCSJujutsu:
@@ -171,9 +179,15 @@ func main() {
 		commitFn = gitCommit
 	}
 
-	diff, err := getDiff()
+	diff, err := getDiff(ctx)
 	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+			cancel()
+			os.Exit(1)
+		}
 		fmt.Printf("❌ Error: Failed to get diff: %v\n", err)
+		cancel()
 		os.Exit(1)
 	}
 
@@ -183,52 +197,83 @@ func main() {
 		} else {
 			fmt.Println("✅ No changes staged for commit. Nothing to do.")
 		}
+		cancel()
 		os.Exit(0)
 	}
 
 	// Run pre-commit hooks before generating commit message (only for Git)
 	if vcs == VCSGit {
-		if preCommitErr := runPreCommit(); preCommitErr != nil {
+		if preCommitErr := runPreCommit(ctx); preCommitErr != nil {
+			if ctx.Err() != nil {
+				fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+				cancel()
+				os.Exit(1)
+			}
 			fmt.Printf("\n❌ Pre-commit hook failed: %v\n", preCommitErr)
 			fmt.Println("\nPlease fix the issues and try again.")
+			cancel()
 			os.Exit(1)
 		}
 
 		// Get diff again in case pre-commit hooks modified files
-		diff, err = getDiff()
+		diff, err = getDiff(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+				cancel()
+				os.Exit(1)
+			}
 			fmt.Printf("❌ Error: Failed to get diff after pre-commit: %v\n", err)
+			cancel()
 			os.Exit(1)
 		}
 
 		if diff == "" {
 			fmt.Println("✅ No changes staged for commit after pre-commit hooks. Nothing to do.")
+			cancel()
 			os.Exit(0)
 		}
 	}
 
 	// Get file list and stat (non-fatal if these fail)
-	fileList, fileListErr := getFileList()
+	fileList, fileListErr := getFileList(ctx)
 	if fileListErr != nil {
+		if ctx.Err() != nil {
+			fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+			cancel()
+			os.Exit(1)
+		}
 		fmt.Printf("⚠️ Warning: Failed to get file list: %v\n", fileListErr)
 		fileList = ""
 	}
 
-	stat, statErr := getDiffStat()
+	stat, statErr := getDiffStat(ctx)
 	if statErr != nil {
+		if ctx.Err() != nil {
+			fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+			cancel()
+			os.Exit(1)
+		}
 		fmt.Printf("⚠️ Warning: Failed to get diff stat: %v\n", statErr)
 		stat = ""
 	}
 
-	commitMessage, err := generateCommitMessage(executor, diff, fileList, stat)
+	commitMessage, err := generateCommitMessage(ctx, executor, diff, fileList, stat)
 	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+			cancel()
+			os.Exit(1)
+		}
 		fmt.Printf("❌ Error: Failed to generate commit message: %v\n", err)
+		cancel()
 		os.Exit(1)
 	}
 
 	// Check for common error responses from AI
 	if commitMessage == "" {
 		fmt.Println("❌ Error: Commit message is empty")
+		cancel()
 		os.Exit(1)
 	}
 
@@ -242,6 +287,7 @@ func main() {
 		fmt.Println("  - The diff might be too large")
 		fmt.Println("  - The claude CLI might not be properly configured")
 		fmt.Println("  - Try staging fewer files or use --model gemini")
+		cancel()
 		os.Exit(1)
 	}
 
@@ -251,8 +297,14 @@ func main() {
 		fmt.Println("===================================")
 		fmt.Println(commitMessage)
 		fmt.Println("===================================")
-		if err := commitFn(commitMessage); err != nil {
+		if err := commitFn(ctx, commitMessage); err != nil {
+			if ctx.Err() != nil {
+				fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+				cancel()
+				os.Exit(1)
+			}
 			fmt.Printf("\n❌ Commit failed: %v\n", err)
+			cancel()
 			os.Exit(1)
 		}
 		fmt.Println("\n✅ Commit completed successfully!")
@@ -276,6 +328,7 @@ func main() {
 		response, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Printf("❌ Error: Failed to read input: %v\n", err)
+			cancel()
 			os.Exit(1)
 		}
 
@@ -283,15 +336,26 @@ func main() {
 
 		switch response {
 		case "y", "yes":
-			if err := commitFn(commitMessage); err != nil {
+			if err := commitFn(ctx, commitMessage); err != nil {
+				if ctx.Err() != nil {
+					fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+					cancel()
+					os.Exit(1)
+				}
 				fmt.Printf("\n❌ Commit failed: %v\n", err)
+				cancel()
 				os.Exit(1)
 			}
 			fmt.Println("\n✅ Commit completed successfully!")
 			return
 		case "e", "edit":
-			editedMessage, err := editMessageInEditor(commitMessage)
+			editedMessage, err := editMessageInEditor(ctx, commitMessage)
 			if err != nil {
+				if ctx.Err() != nil {
+					fmt.Println("\n⏹️ Interrupted. Cleaning up...")
+					cancel()
+					os.Exit(1)
+				}
 				fmt.Printf("\n❌ Error editing message: %v\n", err)
 				fmt.Println("Keeping original message...")
 				continue
@@ -305,6 +369,7 @@ func main() {
 			continue
 		case "n", "no", "":
 			fmt.Println("\n⏹️ Commit canceled.")
+			cancel()
 			os.Exit(0)
 		default:
 			fmt.Println("\n⚠️ Invalid choice. Please enter y, n, or e.")
@@ -358,7 +423,7 @@ func extractCommitMessage(raw string) string {
 	return extracted
 }
 
-func generateCommitMessage(executor AIExecutor, diff, fileList, stat string) (string, error) {
+func generateCommitMessage(ctx context.Context, executor AIExecutor, diff, fileList, stat string) (string, error) {
 	// Limit diff size to prevent issues with command line argument limits
 	maxDiffSize := 50000
 	truncatedDiff := diff
@@ -435,14 +500,14 @@ BREAKING CHANGE:
 - バッククォート（三つの連続したバッククォート）やコードブロック記号は使用禁止
 - マークダウン記法は使用せず、プレーンテキストとして出力`, fileList, stat, truncationNote, truncatedDiff)
 
-	raw, err := executor.Execute(prompt)
+	raw, err := executor.Execute(ctx, prompt)
 	if err != nil {
 		return "", err
 	}
 	return extractCommitMessage(raw), nil
 }
 
-func editMessageInEditor(originalMessage string) (string, error) {
+func editMessageInEditor(ctx context.Context, originalMessage string) (string, error) {
 	// Get the editor from environment variable, default to vi
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -472,7 +537,7 @@ func editMessageInEditor(originalMessage string) (string, error) {
 
 	// Open the editor
 	// #nosec G204 - editor is from environment variable, which is expected behavior
-	cmd := exec.Command(editor, tmpfileName)
+	cmd := exec.CommandContext(ctx, editor, tmpfileName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -490,17 +555,17 @@ func editMessageInEditor(originalMessage string) (string, error) {
 	return strings.TrimSpace(string(editedContent)), nil
 }
 
-func gitCommit(message string) error {
+func gitCommit(ctx context.Context, message string) error {
 	// Use --no-verify to skip pre-commit hooks since we already ran them
-	cmd := exec.Command("git", "commit", "--no-verify", "-m", message)
+	cmd := exec.CommandContext(ctx, "git", "commit", "--no-verify", "-m", message)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
-func _runPreCommit() error {
+func _runPreCommit(ctx context.Context) error {
 	// Get git repository root directory first
-	rootCmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	rootCmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
 	rootOutput, err := rootCmd.Output()
 	if err != nil {
 		// Not in a git repository
@@ -512,7 +577,7 @@ func _runPreCommit() error {
 	configPath := rootDir + "/.pre-commit-config.yaml"
 	if _, statErr := os.Stat(configPath); os.IsNotExist(statErr) {
 		// No pre-commit configuration file, check for git hook
-		cmd := exec.Command("git", "rev-parse", "--git-path", "hooks/pre-commit")
+		cmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-path", "hooks/pre-commit")
 		output, hookErr := cmd.Output()
 		if hookErr != nil {
 			// No pre-commit available, skip silently
@@ -527,7 +592,7 @@ func _runPreCommit() error {
 
 		// Git hook exists but no config file, run the hook directly
 		fmt.Println("\n🔍 Running pre-commit hook...")
-		hookCmd := exec.Command(hookPath)
+		hookCmd := exec.CommandContext(ctx, hookPath)
 		hookCmd.Stdout = os.Stdout
 		hookCmd.Stderr = os.Stderr
 		hookCmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+os.Getenv("GIT_INDEX_FILE"))
@@ -552,7 +617,7 @@ func _runPreCommit() error {
 	fmt.Println("\n🔍 Running pre-commit hooks...")
 
 	// Get list of staged files
-	stagedCmd := exec.Command("git", "diff", "--cached", "--name-only", "--diff-filter=ACM")
+	stagedCmd := exec.CommandContext(ctx, "git", "diff", "--cached", "--name-only", "--diff-filter=ACM")
 	stagedCmd.Dir = rootDir
 	stagedOutput, err := stagedCmd.Output()
 	if err != nil {
@@ -567,7 +632,7 @@ func _runPreCommit() error {
 
 	// Run pre-commit with explicit file list
 	args := append([]string{"run", "--files"}, stagedFiles...)
-	cmd := exec.Command("pre-commit", args...)
+	cmd := exec.CommandContext(ctx, "pre-commit", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = rootDir
@@ -582,8 +647,8 @@ func _runPreCommit() error {
 
 var runPreCommit = _runPreCommit
 
-func _getStagedDiff() (string, error) {
-	cmd := exec.Command("git", "diff", "--staged")
+func _getStagedDiff(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--staged")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -593,8 +658,8 @@ func _getStagedDiff() (string, error) {
 
 var getStagedDiff = _getStagedDiff
 
-func _getStagedFileList() (string, error) {
-	cmd := exec.Command("git", "diff", "--staged", "--name-only")
+func _getStagedFileList(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--name-only")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -604,8 +669,8 @@ func _getStagedFileList() (string, error) {
 
 var getStagedFileList = _getStagedFileList
 
-func _getStagedDiffStat() (string, error) {
-	cmd := exec.Command("git", "diff", "--staged", "--stat")
+func _getStagedDiffStat(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "git", "diff", "--staged", "--stat")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -615,8 +680,8 @@ func _getStagedDiffStat() (string, error) {
 
 var getStagedDiffStat = _getStagedDiffStat
 
-func _getJJDiff() (string, error) {
-	cmd := exec.Command("jj", "diff")
+func _getJJDiff(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "jj", "diff")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -626,8 +691,8 @@ func _getJJDiff() (string, error) {
 
 var getJJDiff = _getJJDiff
 
-func _getJJFileList() (string, error) {
-	cmd := exec.Command("jj", "diff", "--summary")
+func _getJJFileList(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "jj", "diff", "--summary")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -656,8 +721,8 @@ func parseJJSummary(summary string) string {
 	return strings.Join(files, "\n")
 }
 
-func _getJJDiffStat() (string, error) {
-	cmd := exec.Command("jj", "diff", "--stat")
+func _getJJDiffStat(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "jj", "diff", "--stat")
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -667,8 +732,8 @@ func _getJJDiffStat() (string, error) {
 
 var getJJDiffStat = _getJJDiffStat
 
-func jjCommit(message string) error {
-	cmd := exec.Command("jj", "commit", "-m", message)
+func jjCommit(ctx context.Context, message string) error {
+	cmd := exec.CommandContext(ctx, "jj", "commit", "-m", message)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
