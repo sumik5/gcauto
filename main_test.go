@@ -533,6 +533,174 @@ func TestDetectVCS(t *testing.T) {
 	}
 }
 
+func TestMainAutoConfirm(t *testing.T) {
+	// Set up test environment inside the BE_CRASHER subprocess
+	if os.Getenv("BE_CRASHER") == "1" && os.Getenv("TEST_NAME") == "TestMainAutoConfirm" {
+		// Create a temporary directory for git repository
+		tempDir, err := os.MkdirTemp("", "gcauto-test-*")
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			_ = os.RemoveAll(tempDir)
+		}()
+
+		if chdirErr := os.Chdir(tempDir); chdirErr != nil {
+			panic(chdirErr)
+		}
+
+		cmd := exec.Command("git", "init")
+		if initErr := cmd.Run(); initErr != nil {
+			panic(fmt.Sprintf("Failed to initialize git repo: %v", initErr))
+		}
+
+		cmd = exec.Command("git", "config", "user.email", "test@example.com")
+		if configErr := cmd.Run(); configErr != nil {
+			panic(fmt.Sprintf("Failed to set git user.email: %v", configErr))
+		}
+
+		cmd = exec.Command("git", "config", "user.name", "Test User")
+		if configErr := cmd.Run(); configErr != nil {
+			panic(fmt.Sprintf("Failed to set git user.name: %v", configErr))
+		}
+
+		// Create and stage a test file
+		testFile := "test.txt"
+		if writeErr := os.WriteFile(testFile, []byte("test content"), 0o644); writeErr != nil {
+			panic(writeErr)
+		}
+
+		cmd = exec.Command("git", "add", testFile)
+		if addErr := cmd.Run(); addErr != nil {
+			panic(fmt.Sprintf("Failed to add file: %v", addErr))
+		}
+
+		// Mock AI executor
+		originalNewExecutor := newExecutor
+		newExecutor = func(model string) (AIExecutor, error) {
+			return &MockAIExecutor{
+				MockResponse: "test: auto-confirm test commit message",
+			}, nil
+		}
+		defer func() {
+			newExecutor = originalNewExecutor
+		}()
+
+		// Strip test runner flags when running main
+		args := os.Args
+		for i, arg := range args {
+			if arg == "--" {
+				os.Args = append([]string{args[0]}, args[i+1:]...)
+				break
+			}
+		}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMainAutoConfirm$", "--", "-y")
+	cmd.Env = append(os.Environ(), "BE_CRASHER=1", "TEST_NAME=TestMainAutoConfirm")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("Process exited with error: %v\nOutput: %s", err, output)
+	}
+
+	expectedOutput := "✅ Commit completed successfully!"
+	if !strings.Contains(string(output), expectedOutput) {
+		t.Errorf("Expected output to contain '%s', but got '%s'", expectedOutput, string(output))
+	}
+
+	expectedMessage := "test: auto-confirm test commit message"
+	if !strings.Contains(string(output), expectedMessage) {
+		t.Errorf("Expected output to contain commit message '%s', but got '%s'", expectedMessage, string(output))
+	}
+}
+
+func TestMainAutoConfirmWithYesFlag(t *testing.T) {
+	// Set up test environment inside the BE_CRASHER subprocess
+	if os.Getenv("BE_CRASHER") == "1" && os.Getenv("TEST_NAME") == "TestMainAutoConfirmWithYesFlag" {
+		// Create a temporary directory for git repository
+		tempDir, err := os.MkdirTemp("", "gcauto-test-*")
+		if err != nil {
+			panic(err)
+		}
+		defer func() {
+			_ = os.RemoveAll(tempDir)
+		}()
+
+		if chdirErr := os.Chdir(tempDir); chdirErr != nil {
+			panic(chdirErr)
+		}
+
+		cmd := exec.Command("git", "init")
+		if initErr := cmd.Run(); initErr != nil {
+			panic(fmt.Sprintf("Failed to initialize git repo: %v", initErr))
+		}
+
+		cmd = exec.Command("git", "config", "user.email", "test@example.com")
+		if configErr := cmd.Run(); configErr != nil {
+			panic(fmt.Sprintf("Failed to set git user.email: %v", configErr))
+		}
+
+		cmd = exec.Command("git", "config", "user.name", "Test User")
+		if configErr := cmd.Run(); configErr != nil {
+			panic(fmt.Sprintf("Failed to set git user.name: %v", configErr))
+		}
+
+		// Create and stage a test file
+		testFile := "README.md"
+		if writeErr := os.WriteFile(testFile, []byte("test readme"), 0o644); writeErr != nil {
+			panic(writeErr)
+		}
+
+		cmd = exec.Command("git", "add", testFile)
+		if addErr := cmd.Run(); addErr != nil {
+			panic(fmt.Sprintf("Failed to add file: %v", addErr))
+		}
+
+		// Mock AI executor
+		originalNewExecutor := newExecutor
+		newExecutor = func(model string) (AIExecutor, error) {
+			return &MockAIExecutor{
+				MockResponse: "docs: update README with --yes flag",
+			}, nil
+		}
+		defer func() {
+			newExecutor = originalNewExecutor
+		}()
+
+		// Strip test runner flags when running main
+		args := os.Args
+		for i, arg := range args {
+			if arg == "--" {
+				os.Args = append([]string{args[0]}, args[i+1:]...)
+				break
+			}
+		}
+		main()
+		return
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestMainAutoConfirmWithYesFlag$", "--", "--yes")
+	cmd.Env = append(os.Environ(), "BE_CRASHER=1", "TEST_NAME=TestMainAutoConfirmWithYesFlag")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Errorf("Process exited with error: %v\nOutput: %s", err, output)
+	}
+
+	expectedOutput := "✅ Commit completed successfully!"
+	if !strings.Contains(string(output), expectedOutput) {
+		t.Errorf("Expected output to contain '%s', but got '%s'", expectedOutput, string(output))
+	}
+
+	expectedMessage := "docs: update README with --yes flag"
+	if !strings.Contains(string(output), expectedMessage) {
+		t.Errorf("Expected output to contain commit message '%s', but got '%s'", expectedMessage, string(output))
+	}
+}
+
 func TestMain_InvalidModel(t *testing.T) {
 	originalDetectVCSFn := detectVCSFn
 	detectVCSFn = func() VCSType {

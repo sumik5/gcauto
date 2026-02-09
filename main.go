@@ -110,6 +110,8 @@ func main() {
 	showHelp := flag.Bool("h", false, "Show help message")
 	showHelpLong := flag.Bool("help", false, "Show help message (longhand for -h)")
 	showVersion := flag.Bool("version", false, "Show version information")
+	yesShort := flag.Bool("y", false, "Automatically confirm and commit without prompting")
+	yesLong := flag.Bool("yes", false, "Automatically confirm and commit without prompting (longhand for -y)")
 
 	flag.Usage = func() {
 		_, _ = fmt.Fprintf(os.Stderr, "gcauto: AI-powered git commit message generator.\n\n")
@@ -124,6 +126,8 @@ func main() {
 	if *modelShort != "" {
 		*model = *modelShort
 	}
+
+	autoConfirm := *yesShort || *yesLong
 
 	if *showHelp || *showHelpLong {
 		flag.Usage()
@@ -239,6 +243,20 @@ func main() {
 		fmt.Println("  - The claude CLI might not be properly configured")
 		fmt.Println("  - Try staging fewer files or use --model gemini")
 		os.Exit(1)
+	}
+
+	// Auto-confirm mode: commit without prompting
+	if autoConfirm {
+		fmt.Println("\n📝 Generated Commit Message:")
+		fmt.Println("===================================")
+		fmt.Println(commitMessage)
+		fmt.Println("===================================")
+		if err := commitFn(commitMessage); err != nil {
+			fmt.Printf("\n❌ Commit failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("\n✅ Commit completed successfully!")
+		return
 	}
 
 	// Loop for confirmation with edit option
