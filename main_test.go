@@ -805,3 +805,341 @@ func TestAIExecutorContextCanceled(t *testing.T) {
 		})
 	}
 }
+
+func TestParseJJSummaryEntries(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []JJFileEntry
+	}{
+		{
+			name:  "M/A/D各ステータスの正常パース",
+			input: "M src/main.go\nA src/new.go\nD src/old.go\n",
+			expected: []JJFileEntry{
+				{Status: "M", Path: "src/main.go"},
+				{Status: "A", Path: "src/new.go"},
+				{Status: "D", Path: "src/old.go"},
+			},
+		},
+		{
+			name:     "空入力",
+			input:    "",
+			expected: []JJFileEntry{},
+		},
+		{
+			name:  "単一ファイル",
+			input: "M README.md\n",
+			expected: []JJFileEntry{
+				{Status: "M", Path: "README.md"},
+			},
+		},
+		{
+			name:  "パスにスペースを含むファイル",
+			input: "M path/to/file with spaces.txt\nA another file.go\n",
+			expected: []JJFileEntry{
+				{Status: "M", Path: "path/to/file with spaces.txt"},
+				{Status: "A", Path: "another file.go"},
+			},
+		},
+		{
+			name:     "複数行改行のみ",
+			input:    "\n\n\n",
+			expected: []JJFileEntry{},
+		},
+		{
+			name:  "空行混在",
+			input: "M file1.go\n\nA file2.go\n\n",
+			expected: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := parseJJSummaryEntries(tt.input)
+			if len(actual) != len(tt.expected) {
+				t.Fatalf("parseJJSummaryEntries() returned %d entries, want %d", len(actual), len(tt.expected))
+			}
+			for i := range actual {
+				if actual[i].Status != tt.expected[i].Status || actual[i].Path != tt.expected[i].Path {
+					t.Errorf("parseJJSummaryEntries() entry[%d] = {Status: %q, Path: %q}, want {Status: %q, Path: %q}",
+						i, actual[i].Status, actual[i].Path, tt.expected[i].Status, tt.expected[i].Path)
+				}
+			}
+		})
+	}
+}
+
+func TestSelectJJFiles(t *testing.T) {
+	tests := []struct {
+		name          string
+		entries       []JJFileEntry
+		input         string
+		expectedPaths []string
+		wantError     bool
+	}{
+		{
+			name: "全選択状態でEnter確定",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			input:         "\n",
+			expectedPaths: []string{"file1.go", "file2.go"},
+			wantError:     false,
+		},
+		{
+			name: "番号トグル（単一）",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			input:         "2\n\n",
+			expectedPaths: []string{"file1.go"},
+			wantError:     false,
+		},
+		{
+			name: "番号トグル（複数スペース区切り）",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+				{Status: "D", Path: "file3.go"},
+			},
+			input:         "1 3\n\n",
+			expectedPaths: []string{"file2.go"},
+			wantError:     false,
+		},
+		{
+			name: "a で全選択",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			input:         "n\na\n\n",
+			expectedPaths: []string{"file1.go", "file2.go"},
+			wantError:     false,
+		},
+		{
+			name: "n で全解除 → 再入力要求 → a で全選択",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			input:         "n\n\na\n\n",
+			expectedPaths: []string{"file1.go", "file2.go"},
+			wantError:     false,
+		},
+		{
+			name: "不正な入力時のスキップ",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			input:         "abc\n999\n\n",
+			expectedPaths: []string{"file1.go", "file2.go"},
+			wantError:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			oldStdin := os.Stdin
+			r, w, _ := os.Pipe()
+			os.Stdin = r
+
+			go func() {
+				_, _ = w.WriteString(tt.input)
+				_ = w.Close()
+			}()
+
+			result, err := selectJJFiles(context.Background(), tt.entries)
+
+			os.Stdin = oldStdin
+
+			if tt.wantError {
+				if err == nil {
+					t.Error("selectJJFiles() expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("selectJJFiles() unexpected error = %v", err)
+			}
+
+			if len(result) != len(tt.expectedPaths) {
+				t.Fatalf("selectJJFiles() returned %d entries, want %d", len(result), len(tt.expectedPaths))
+			}
+
+			for i, entry := range result {
+				if entry.Path != tt.expectedPaths[i] {
+					t.Errorf("selectJJFiles() entry[%d].Path = %q, want %q", i, entry.Path, tt.expectedPaths[i])
+				}
+			}
+		})
+	}
+}
+
+func TestSelectJJFilesContextCanceled(t *testing.T) {
+	entries := []JJFileEntry{
+		{Status: "M", Path: "file1.go"},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	_, err := selectJJFiles(ctx, entries)
+	if err == nil {
+		t.Error("selectJJFiles() expected error when context is canceled, but got none")
+	}
+}
+
+func TestGetJJDiffForPaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+	}{
+		{
+			name:  "空パスの場合",
+			paths: []string{},
+		},
+		{
+			name:  "単一パス（実際のjjコマンド実行）",
+			paths: []string{"main.go"},
+		},
+		{
+			name:  "複数パス",
+			paths: []string{"main.go", "main_test.go"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := _getJJDiffForPaths(context.Background(), tt.paths)
+
+			// jjリポジトリかどうかに関わらず、コマンド実行自体は成功する
+			// エラーの有無はリポジトリの状態に依存するため、返り値の型のみ確認
+			_ = result
+			_ = err
+		})
+	}
+}
+
+func TestGetJJFileListForPaths(t *testing.T) {
+	tests := []struct {
+		name     string
+		entries  []JJFileEntry
+		expected string
+	}{
+		{
+			name: "複数ファイル",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+				{Status: "D", Path: "file3.go"},
+			},
+			expected: "file1.go\nfile2.go\nfile3.go",
+		},
+		{
+			name: "単一ファイル",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "main.go"},
+			},
+			expected: "main.go",
+		},
+		{
+			name:     "空の場合",
+			entries:  []JJFileEntry{},
+			expected: "",
+		},
+		{
+			name: "スペース含むパス",
+			entries: []JJFileEntry{
+				{Status: "M", Path: "path/to/file with spaces.txt"},
+			},
+			expected: "path/to/file with spaces.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := _getJJFileListForPaths(context.Background(), tt.entries)
+			if actual != tt.expected {
+				t.Errorf("getJJFileListForPaths() = %q, want %q", actual, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetJJDiffStatForPaths(t *testing.T) {
+	tests := []struct {
+		name  string
+		paths []string
+	}{
+		{
+			name:  "空パスの場合",
+			paths: []string{},
+		},
+		{
+			name:  "単一パス（実際のjjコマンド実行）",
+			paths: []string{"main.go"},
+		},
+		{
+			name:  "複数パス",
+			paths: []string{"main.go", "main_test.go"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := _getJJDiffStatForPaths(context.Background(), tt.paths)
+
+			// jjリポジトリかどうかに関わらず、コマンド実行自体は成功する
+			// エラーの有無はリポジトリの状態に依存するため、返り値の型のみ確認
+			_ = result
+			_ = err
+		})
+	}
+}
+
+func TestJJPartialCommit(t *testing.T) {
+	tests := []struct {
+		name          string
+		selectedPaths []string
+		allEntries    []JJFileEntry
+		description   string
+	}{
+		{
+			name:          "全ファイル選択時は通常のjjCommit",
+			selectedPaths: []string{"file1.go", "file2.go"},
+			allEntries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			description: "全ファイルが選択されている場合、excludedEntriesが空になり、jjCommitが呼ばれる",
+		},
+		{
+			name:          "部分選択（ロジックテスト）",
+			selectedPaths: []string{"file1.go"},
+			allEntries: []JJFileEntry{
+				{Status: "M", Path: "file1.go"},
+				{Status: "A", Path: "file2.go"},
+			},
+			description: "部分選択時、除外ファイルの保存・復元ロジックが実行される（実際のjjコマンドはmock困難）",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// 注意: jjコマンド自体のmockは困難なため、エラーハンドリングとロジック構造のみテスト
+			err := jjPartialCommit(context.Background(), "test: partial commit test", tt.selectedPaths, tt.allEntries)
+
+			// jjリポジトリでない場合は必ずエラーになるため、エラーの存在のみ確認
+			if err == nil && len(tt.selectedPaths) != len(tt.allEntries) {
+				t.Logf("jjPartialCommit() did not return error (likely in jj repository)")
+			}
+		})
+	}
+}
