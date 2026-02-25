@@ -66,8 +66,8 @@ type GeminiExecutor struct{}
 
 // Execute runs the gemini command with the given prompt.
 func (e *GeminiExecutor) Execute(ctx context.Context, prompt string) (string, error) {
-	// Assuming gemini command has a similar interface to claude.
-	cmd := exec.CommandContext(ctx, "gemini", "-p", prompt)
+	cmd := exec.CommandContext(ctx, "gemini", "-p")
+	cmd.Stdin = strings.NewReader(prompt)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -88,12 +88,55 @@ func (e *GeminiExecutor) Execute(ctx context.Context, prompt string) (string, er
 	return strings.TrimSpace(strings.Join(filteredLines, "\n")), nil
 }
 
+// CodexExecutor implements AIExecutor for the Codex model.
+type CodexExecutor struct{}
+
+// Execute runs the codex command with the given prompt using the exec subcommand.
+func (e *CodexExecutor) Execute(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "codex", "exec", prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return "", fmt.Errorf("codex execution failed: %w: %s", err, string(exitErr.Stderr))
+		}
+		return "", fmt.Errorf("failed to run codex command: %w", err)
+	}
+
+	// codex exec outputs log lines (e.g. "[2026-02-25T00:25:46] codex", "[...] tokens used: N")
+	// along with echoed prompt content. Extract only the AI response by finding the last log marker.
+	lines := strings.Split(string(output), "\n")
+
+	// Find the last "[YYYY-MM-DDT...] codex" line which marks the start of the AI response
+	startIndex := 0
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && trimmed[0] == '[' && strings.Contains(trimmed, "] codex") {
+			startIndex = i + 1
+		}
+	}
+
+	// Filter out remaining log/metadata lines
+	var filteredLines []string
+	for _, line := range lines[startIndex:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && trimmed[0] == '[' && strings.Contains(trimmed, "] tokens used:") {
+			continue
+		}
+		filteredLines = append(filteredLines, line)
+	}
+
+	return strings.TrimSpace(strings.Join(filteredLines, "\n")), nil
+}
+
 var newExecutor = func(model string) (AIExecutor, error) {
 	switch model {
 	case "claude":
 		return &ClaudeExecutor{}, nil
 	case "gemini":
 		return &GeminiExecutor{}, nil
+	case "codex":
+		return &CodexExecutor{}, nil
 	default:
 		return nil, fmt.Errorf("invalid model specified: %s", model)
 	}
@@ -114,8 +157,8 @@ var detectVCSFn = _detectVCS
 var version = "dev" // Can be set during build
 
 func main() {
-	model := flag.String("model", "claude", "AI model to use (claude or gemini)")
-	modelShort := flag.String("m", "", "AI model to use (claude or gemini) (shorthand for -model)")
+	model := flag.String("model", "claude", "AI model to use (claude, gemini or codex)")
+	modelShort := flag.String("m", "", "AI model to use (claude, gemini or codex) (shorthand for -model)")
 	showHelp := flag.Bool("h", false, "Show help message")
 	showHelpLong := flag.Bool("help", false, "Show help message (longhand for -h)")
 	showVersion := flag.Bool("version", false, "Show version information")
@@ -359,7 +402,7 @@ func main() {
 		fmt.Println("\nPossible causes:")
 		fmt.Println("  - The diff might be too large")
 		fmt.Println("  - The claude CLI might not be properly configured")
-		fmt.Println("  - Try staging fewer files or use --model gemini")
+		fmt.Println("  - Try staging fewer files or use --model gemini/codex")
 		cancel()
 		os.Exit(1)
 	}
@@ -609,7 +652,7 @@ func editMessageInEditor(ctx context.Context, originalMessage string) (string, e
 	}
 
 	// Open the editor
-	// #nosec G204 - editor is from environment variable, which is expected behavior
+	// #nosec G204,G702 - editor is from environment variable, which is expected behavior
 	cmd := exec.CommandContext(ctx, editor, tmpfileName)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -620,7 +663,7 @@ func editMessageInEditor(ctx context.Context, originalMessage string) (string, e
 	}
 
 	// Read the edited content
-	editedContent, readErr := os.ReadFile(tmpfileName)
+	editedContent, readErr := os.ReadFile(tmpfileName) // #nosec G703 - tmpfileName is from os.CreateTemp, not user input
 	if readErr != nil {
 		return "", fmt.Errorf("failed to read edited file: %w", readErr)
 	}

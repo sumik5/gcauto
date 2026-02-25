@@ -17,7 +17,7 @@ gcautoは、ステージングされたGitの変更を分析し、AIを使用し
 - Conventional Commitsフォーマットに準拠したコミットメッセージを生成
 - 日本語でのわかりやすいコミットメッセージ
 - コミット前の確認プロンプト
-- 使用するAIモデルを選択可能（Claude, Gemini）
+- 使用するAIモデルを選択可能（Claude, Gemini, Codex）
 
 ## 必要条件
 
@@ -26,6 +26,7 @@ gcautoは、ステージングされたGitの変更を分析し、AIを使用し
 - 使用するAIモデルに応じたCLIツールがインストールされ、設定済みであること
   - [Claude CLI](https://docs.anthropic.com/claude/docs/claude-cli)
   - [Gemini CLI](https://ai.google.dev/tutorials/gemini_cli_quickstart?hl=ja)
+  - [Codex CLI](https://github.com/openai/codex)
 - [mise](https://mise.jdx.dev/)（開発時のタスク管理用、オプション）
 
 ## 使い方
@@ -41,6 +42,11 @@ gcauto
 gcauto --model gemini
 # または
 gcauto -m gemini
+
+# Codexを使用する場合
+gcauto --model codex
+# または
+gcauto -m codex
 
 # コミットメッセージが自動生成され、確認プロンプトが表示されます
 ```

@@ -791,6 +791,10 @@ func TestAIExecutorContextCanceled(t *testing.T) {
 			name:     "GeminiExecutor with canceled context",
 			executor: &GeminiExecutor{},
 		},
+		{
+			name:     "CodexExecutor with canceled context",
+			executor: &CodexExecutor{},
+		},
 	}
 
 	for _, tt := range tests {
