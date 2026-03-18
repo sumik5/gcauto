@@ -1,6 +1,6 @@
 # mise configuration for gcauto
 [tools]
-go = "1.24"
+go = "1.26.1"
 
 [tasks.build]
 description = "Build the binary for current platform"

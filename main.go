@@ -14,20 +14,6 @@ import (
 	"syscall"
 )
 
-// VCSType represents the version control system type.
-type VCSType int
-
-const (
-	VCSGit VCSType = iota
-	VCSJujutsu
-)
-
-// JJFileEntry represents a file entry from jj diff --summary.
-type JJFileEntry struct {
-	Status string // "M", "A", "D"
-	Path   string
-}
-
 // AIExecutor defines the interface for executing AI models.
 type AIExecutor interface {
 	Execute(ctx context.Context, prompt string) (string, error)
@@ -142,22 +128,10 @@ var newExecutor = func(model string) (AIExecutor, error) {
 	}
 }
 
-// _detectVCS detects the version control system type.
-// It checks if the current directory is a Jujutsu repository by running "jj root".
-func _detectVCS(ctx context.Context) VCSType {
-	cmd := exec.CommandContext(ctx, "jj", "root")
-	if err := cmd.Run(); err != nil {
-		return VCSGit
-	}
-	return VCSJujutsu
-}
-
-var detectVCSFn = _detectVCS
-
 var version = "dev" // Can be set during build
 
 func main() {
-	model := flag.String("model", "claude", "AI model to use (claude, gemini or codex)")
+	model := flag.String("model", "codex", "AI model to use (claude, gemini or codex)")
 	modelShort := flag.String("m", "", "AI model to use (claude, gemini or codex) (shorthand for -model)")
 	showHelp := flag.Bool("h", false, "Show help message")
 	showHelpLong := flag.Bool("help", false, "Show help message (longhand for -h)")
@@ -204,96 +178,10 @@ func main() {
 		os.Exit(1) // nolint:gocritic // cancel() is explicitly called before exit
 	}
 
-	// VCS detection
-	vcs := detectVCSFn(ctx)
-
-	// Select VCS-specific functions
-	var getDiff func(context.Context) (string, error)
-	var getFileList func(context.Context) (string, error)
-	var getDiffStat func(context.Context) (string, error)
-	var commitFn func(context.Context, string) error
-
-	switch vcs {
-	case VCSJujutsu:
-		fmt.Println("📦 Detected Jujutsu repository")
-
-		// For Jujutsu in non-autoConfirm mode, allow file selection
-		if !autoConfirm {
-			// Get file list first
-			summaryCmd := exec.CommandContext(ctx, "jj", "diff", "--summary")
-			summaryOutput, summaryErr := summaryCmd.Output()
-			if summaryErr != nil {
-				fmt.Printf("❌ Error: Failed to get file list: %v\n", summaryErr)
-				cancel()
-				os.Exit(1)
-			}
-
-			allEntries := parseJJSummaryEntries(string(summaryOutput))
-
-			// If there are 2 or more files, allow selection
-			if len(allEntries) >= 2 {
-				selectedEntries, selectErr := selectJJFiles(ctx, allEntries)
-				if selectErr != nil {
-					if ctx.Err() != nil {
-						fmt.Println("\n⏹️ Interrupted. Cleaning up...")
-						cancel()
-						os.Exit(1)
-					}
-					fmt.Printf("❌ Error: Failed to select files: %v\n", selectErr)
-					cancel()
-					os.Exit(1)
-				}
-
-				// Check if all files are selected
-				if len(selectedEntries) == len(allEntries) {
-					// All files selected - use regular commit flow
-					getDiff = getJJDiff
-					getFileList = getJJFileList
-					getDiffStat = getJJDiffStat
-					commitFn = jjCommit
-				} else {
-					// Partial selection - use filtered functions
-					selectedPaths := make([]string, len(selectedEntries))
-					for i, entry := range selectedEntries {
-						selectedPaths[i] = entry.Path
-					}
-
-					getDiff = func(ctx context.Context) (string, error) {
-						return getJJDiffForPaths(ctx, selectedPaths)
-					}
-					getFileList = func(ctx context.Context) (string, error) {
-						return getJJFileListForPaths(ctx, selectedEntries), nil
-					}
-					getDiffStat = func(ctx context.Context) (string, error) {
-						return getJJDiffStatForPaths(ctx, selectedPaths)
-					}
-					commitFn = func(ctx context.Context, message string) error {
-						return jjPartialCommit(ctx, message, selectedPaths, allEntries)
-					}
-
-					fmt.Printf("\n🤖 Generating commit message for %d selected files...\n", len(selectedEntries))
-				}
-			} else {
-				// 0 or 1 file - use regular commit flow
-				getDiff = getJJDiff
-				getFileList = getJJFileList
-				getDiffStat = getJJDiffStat
-				commitFn = jjCommit
-			}
-		} else {
-			// Auto-confirm mode - use regular commit flow
-			getDiff = getJJDiff
-			getFileList = getJJFileList
-			getDiffStat = getJJDiffStat
-			commitFn = jjCommit
-		}
-	case VCSGit:
-		fmt.Println("📦 Detected Git repository")
-		getDiff = getStagedDiff
-		getFileList = getStagedFileList
-		getDiffStat = getStagedDiffStat
-		commitFn = gitCommit
-	}
+	getDiff := getStagedDiff
+	getFileList := getStagedFileList
+	getDiffStat := getStagedDiffStat
+	commitFn := gitCommit
 
 	diff, err := getDiff(ctx)
 	if err != nil {
@@ -308,47 +196,41 @@ func main() {
 	}
 
 	if diff == "" {
-		if vcs == VCSJujutsu {
-			fmt.Println("✅ No changes in current working copy. Nothing to do.")
-		} else {
-			fmt.Println("✅ No changes staged for commit. Nothing to do.")
-		}
+		fmt.Println("✅ No changes staged for commit. Nothing to do.")
 		cancel()
 		os.Exit(0)
 	}
 
-	// Run pre-commit hooks before generating commit message (only for Git)
-	if vcs == VCSGit {
-		if preCommitErr := runPreCommit(ctx); preCommitErr != nil {
-			if ctx.Err() != nil {
-				fmt.Println("\n⏹️ Interrupted. Cleaning up...")
-				cancel()
-				os.Exit(1)
-			}
-			fmt.Printf("\n❌ Pre-commit hook failed: %v\n", preCommitErr)
-			fmt.Println("\nPlease fix the issues and try again.")
+	// Run pre-commit hooks before generating commit message
+	if preCommitErr := runPreCommit(ctx); preCommitErr != nil {
+		if ctx.Err() != nil {
+			fmt.Println("\n⏹️ Interrupted. Cleaning up...")
 			cancel()
 			os.Exit(1)
 		}
+		fmt.Printf("\n❌ Pre-commit hook failed: %v\n", preCommitErr)
+		fmt.Println("\nPlease fix the issues and try again.")
+		cancel()
+		os.Exit(1)
+	}
 
-		// Get diff again in case pre-commit hooks modified files
-		diff, err = getDiff(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				fmt.Println("\n⏹️ Interrupted. Cleaning up...")
-				cancel()
-				os.Exit(1)
-			}
-			fmt.Printf("❌ Error: Failed to get diff after pre-commit: %v\n", err)
+	// Get diff again in case pre-commit hooks modified files
+	diff, err = getDiff(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			fmt.Println("\n⏹️ Interrupted. Cleaning up...")
 			cancel()
 			os.Exit(1)
 		}
+		fmt.Printf("❌ Error: Failed to get diff after pre-commit: %v\n", err)
+		cancel()
+		os.Exit(1)
+	}
 
-		if diff == "" {
-			fmt.Println("✅ No changes staged for commit after pre-commit hooks. Nothing to do.")
-			cancel()
-			os.Exit(0)
-		}
+	if diff == "" {
+		fmt.Println("✅ No changes staged for commit after pre-commit hooks. Nothing to do.")
+		cancel()
+		os.Exit(0)
 	}
 
 	// Get file list and stat (non-fatal if these fail)
@@ -795,335 +677,3 @@ func _getStagedDiffStat(ctx context.Context) (string, error) {
 }
 
 var getStagedDiffStat = _getStagedDiffStat
-
-func _getJJDiff(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "jj", "diff")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
-}
-
-var getJJDiff = _getJJDiff
-
-func _getJJFileList(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "jj", "diff", "--summary")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return parseJJSummary(string(output)), nil
-}
-
-var getJJFileList = _getJJFileList
-
-// parseJJSummary parses "jj diff --summary" output to extract file names.
-// Each line is like "M path/to/file" or "A path/to/file".
-func parseJJSummary(summary string) string {
-	lines := strings.Split(strings.TrimSpace(summary), "\n")
-	var files []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Format: "M path/to/file" or "A path/to/file" or "D path/to/file"
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) == 2 {
-			files = append(files, strings.TrimSpace(parts[1]))
-		}
-	}
-	return strings.Join(files, "\n")
-}
-
-// parseJJSummaryEntries parses "jj diff --summary" output to extract file entries with status.
-func parseJJSummaryEntries(summary string) []JJFileEntry {
-	lines := strings.Split(strings.TrimSpace(summary), "\n")
-	var entries []JJFileEntry
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		// Format: "M path/to/file" or "A path/to/file" or "D path/to/file"
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) == 2 {
-			entries = append(entries, JJFileEntry{
-				Status: strings.TrimSpace(parts[0]),
-				Path:   strings.TrimSpace(parts[1]),
-			})
-		}
-	}
-	return entries
-}
-
-// selectJJFiles presents an interactive UI for selecting files to commit.
-// Default is all files selected. Returns selected entries or error.
-func selectJJFiles(ctx context.Context, entries []JJFileEntry) ([]JJFileEntry, error) {
-	// Initialize all files as selected
-	selected := make([]bool, len(entries))
-	for i := range selected {
-		selected[i] = true
-	}
-
-	reader := bufio.NewReader(os.Stdin)
-
-	for {
-		// Display file list with selection status
-		fmt.Println("\n📋 Changed files in working copy (@):")
-		for i, entry := range entries {
-			checkbox := "✅"
-			if !selected[i] {
-				checkbox = "❌"
-			}
-			fmt.Printf("  [%d] %s %s %s\n", i+1, checkbox, entry.Status, entry.Path)
-		}
-
-		fmt.Print("\nSelect files to commit (toggle: number, a: all, n: none, Enter: confirm): ")
-
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
-
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return nil, fmt.Errorf("failed to read input: %w", err)
-		}
-
-		input = strings.TrimSpace(input)
-
-		// Handle empty input (Enter) - confirm selection
-		if input == "" {
-			// Check if at least one file is selected
-			hasSelection := false
-			for _, sel := range selected {
-				if sel {
-					hasSelection = true
-					break
-				}
-			}
-			if !hasSelection {
-				fmt.Println("\n⚠️ No files selected. Please select at least one file.")
-				continue
-			}
-
-			// Build result
-			var result []JJFileEntry
-			for i, entry := range entries {
-				if selected[i] {
-					result = append(result, entry)
-				}
-			}
-			return result, nil
-		}
-
-		// Handle 'a' - select all
-		if input == "a" {
-			for i := range selected {
-				selected[i] = true
-			}
-			continue
-		}
-
-		// Handle 'n' - select none
-		if input == "n" {
-			for i := range selected {
-				selected[i] = false
-			}
-			continue
-		}
-
-		// Handle number(s) - toggle selection
-		numbers := strings.Fields(input)
-		for _, numStr := range numbers {
-			var num int
-			if _, scanErr := fmt.Sscanf(numStr, "%d", &num); scanErr != nil {
-				fmt.Printf("⚠️ Invalid input: %s\n", numStr)
-				continue
-			}
-			if num < 1 || num > len(entries) {
-				fmt.Printf("⚠️ Number out of range: %d (valid: 1-%d)\n", num, len(entries))
-				continue
-			}
-			// Toggle selection (1-indexed to 0-indexed)
-			selected[num-1] = !selected[num-1]
-		}
-	}
-}
-
-// _getJJDiffForPaths gets diff for specific paths.
-func _getJJDiffForPaths(ctx context.Context, paths []string) (string, error) {
-	args := append([]string{"diff"}, paths...)
-	cmd := exec.CommandContext(ctx, "jj", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return string(output), nil
-}
-
-var getJJDiffForPaths = _getJJDiffForPaths
-
-// _getJJFileListForPaths formats file list from entries.
-func _getJJFileListForPaths(ctx context.Context, entries []JJFileEntry) string {
-	paths := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		paths = append(paths, entry.Path)
-	}
-	return strings.Join(paths, "\n")
-}
-
-var getJJFileListForPaths = _getJJFileListForPaths
-
-// _getJJDiffStatForPaths gets diff stat for specific paths.
-func _getJJDiffStatForPaths(ctx context.Context, paths []string) (string, error) {
-	args := append([]string{"diff", "--stat"}, paths...)
-	cmd := exec.CommandContext(ctx, "jj", args...)
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-var getJJDiffStatForPaths = _getJJDiffStatForPaths
-
-// jjPartialCommit performs a partial commit by:
-// 1. Saving excluded files' content
-// 2. Restoring excluded files to parent state
-// 3. Committing selected files
-// 4. Restoring excluded files' changes
-func jjPartialCommit(ctx context.Context, message string, selectedPaths []string, allEntries []JJFileEntry) error {
-	// Build map of selected paths for quick lookup
-	selectedMap := make(map[string]bool)
-	for _, path := range selectedPaths {
-		selectedMap[path] = true
-	}
-
-	// Find excluded files
-	var excludedEntries []JJFileEntry
-	for _, entry := range allEntries {
-		if !selectedMap[entry.Path] {
-			excludedEntries = append(excludedEntries, entry)
-		}
-	}
-
-	// If no files are excluded, use regular commit
-	if len(excludedEntries) == 0 {
-		return jjCommit(ctx, message)
-	}
-
-	// Step 1: Save excluded files' content
-	type savedFile struct {
-		path    string
-		content []byte
-		deleted bool
-	}
-	savedFiles := make([]savedFile, 0, len(excludedEntries))
-
-	for _, entry := range excludedEntries {
-		if entry.Status == "D" {
-			// Deleted file - just mark as deleted
-			savedFiles = append(savedFiles, savedFile{
-				path:    entry.Path,
-				deleted: true,
-			})
-		} else {
-			// Modified or Added - save content
-			content, err := os.ReadFile(entry.Path)
-			if err != nil {
-				return fmt.Errorf("failed to read excluded file %s: %w", entry.Path, err)
-			}
-			savedFiles = append(savedFiles, savedFile{
-				path:    entry.Path,
-				content: content,
-				deleted: false,
-			})
-		}
-	}
-
-	// Step 2: Restore excluded files to parent state
-	excludedPaths := make([]string, 0, len(excludedEntries))
-	for _, entry := range excludedEntries {
-		excludedPaths = append(excludedPaths, entry.Path)
-	}
-
-	restoreArgs := append([]string{"restore"}, excludedPaths...)
-	restoreCmd := exec.CommandContext(ctx, "jj", restoreArgs...)
-	restoreCmd.Stdout = os.Stdout
-	restoreCmd.Stderr = os.Stderr
-	if err := restoreCmd.Run(); err != nil {
-		return fmt.Errorf("failed to restore excluded files: %w", err)
-	}
-
-	// Step 3: Commit selected files
-	if err := jjCommit(ctx, message); err != nil {
-		// Try to restore excluded files before returning error
-		fmt.Println("\n⚠️ Commit failed. Attempting to restore excluded files...")
-		for _, saved := range savedFiles {
-			if saved.deleted {
-				// Re-delete file
-				if removeErr := os.Remove(saved.path); removeErr != nil && !os.IsNotExist(removeErr) {
-					fmt.Printf("⚠️ Failed to re-delete %s: %v\n", saved.path, removeErr)
-				}
-			} else {
-				// Restore content
-				if writeErr := os.WriteFile(saved.path, saved.content, 0o644); writeErr != nil {
-					fmt.Printf("⚠️ Failed to restore %s: %v\n", saved.path, writeErr)
-				}
-			}
-		}
-		return fmt.Errorf("commit failed: %w", err)
-	}
-
-	// Step 4: Restore excluded files' changes (jj auto-tracks them)
-	for _, saved := range savedFiles {
-		// Check for context cancellation
-		select {
-		case <-ctx.Done():
-			fmt.Println("\n⚠️ Interrupted during file restoration. Some excluded files may not be restored.")
-			fmt.Println("Please manually check and restore if needed:")
-			for _, remaining := range savedFiles {
-				fmt.Printf("  - %s\n", remaining.path)
-			}
-			return ctx.Err()
-		default:
-		}
-
-		if saved.deleted {
-			// Re-delete file
-			if err := os.Remove(saved.path); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to re-delete excluded file %s: %w (manual restoration needed)", saved.path, err)
-			}
-		} else {
-			// Restore content
-			if err := os.WriteFile(saved.path, saved.content, 0o644); err != nil {
-				return fmt.Errorf("failed to restore excluded file %s: %w (manual restoration needed)", saved.path, err)
-			}
-		}
-	}
-
-	return nil
-}
-
-func _getJJDiffStat(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "jj", "diff", "--stat")
-	output, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(output)), nil
-}
-
-var getJJDiffStat = _getJJDiffStat
-
-func jjCommit(ctx context.Context, message string) error {
-	cmd := exec.CommandContext(ctx, "jj", "commit", "-m", message)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
-}
